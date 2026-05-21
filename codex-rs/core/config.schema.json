@@ -572,6 +572,9 @@
             "sqlite": {
               "type": "boolean"
             },
+            "standalone_web_search": {
+              "type": "boolean"
+            },
             "steer": {
               "type": "boolean"
             },
@@ -4501,6 +4504,9 @@
           "type": "boolean"
         },
         "sqlite": {
+          "type": "boolean"
+        },
+        "standalone_web_search": {
           "type": "boolean"
         },
         "steer": {

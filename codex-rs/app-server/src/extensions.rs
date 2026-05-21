@@ -9,16 +9,23 @@ use codex_extension_api::AgentSpawnFuture;
 use codex_extension_api::AgentSpawner;
 use codex_extension_api::ExtensionRegistry;
 use codex_extension_api::ExtensionRegistryBuilder;
+use codex_login::AuthManager;
 use codex_protocol::ThreadId;
 use codex_protocol::error::CodexErr;
+use codex_thread_store::ThreadStore;
 
-pub(crate) fn thread_extensions<S>(guardian_agent_spawner: S) -> Arc<ExtensionRegistry<Config>>
+pub(crate) fn thread_extensions<S>(
+    guardian_agent_spawner: S,
+    auth_manager: Arc<AuthManager>,
+    thread_store: Arc<dyn ThreadStore>,
+) -> Arc<ExtensionRegistry<Config>>
 where
     S: AgentSpawner<StartThreadOptions, Spawned = NewThread, Error = CodexErr> + 'static,
 {
     let mut builder = ExtensionRegistryBuilder::<Config>::new();
     codex_guardian::install(&mut builder, guardian_agent_spawner);
     codex_memories_extension::install(&mut builder);
+    codex_web_search_extension::install(&mut builder, auth_manager, thread_store);
     Arc::new(builder.build())
 }
 

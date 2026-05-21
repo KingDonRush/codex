@@ -183,12 +183,16 @@ mod tests {
         let thread_manager = Arc::new_cyclic(|thread_manager| {
             ThreadManager::new(
                 &good_config,
-                auth_manager,
+                auth_manager.clone(),
                 SessionSource::Exec,
                 Arc::new(EnvironmentManager::default_for_tests()),
-                thread_extensions(guardian_agent_spawner(thread_manager.clone())),
+                thread_extensions(
+                    guardian_agent_spawner(thread_manager.clone()),
+                    auth_manager.clone(),
+                    Arc::clone(&thread_store),
+                ),
                 /*analytics_events_client*/ None,
-                thread_store,
+                Arc::clone(&thread_store),
                 Some(state_db.clone()),
                 "11111111-1111-4111-8111-111111111111".to_string(),
                 /*attestation_provider*/ None,
