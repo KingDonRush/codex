@@ -1042,6 +1042,30 @@ Estado da Fase 1:
 - `apply_patch` direto continua desabilitado no
   catalogo/capabilities.
 
+## Claudex launcher isolado
+
+`claudex` e um entrypoint separado para rodar o mesmo binario Codex sem
+compartilhar estado com o Codex normal. Ele resolve `CLAUDEX_HOME` e injeta esse
+valor como `CODEX_HOME` no processo filho; se `CLAUDEX_HOME` nao existir, usa
+`~/.claudex`.
+
+Uso esperado:
+
+```bash
+claudex --version
+claudex exec "Reply OK."
+CLAUDEX_HOME=/tmp/claudex-home claudex app-server --listen stdio://
+```
+
+Contratos:
+
+- nao le nem grava `~/.codex` por padrao;
+- cria o diretorio de home antes de iniciar o processo filho;
+- aceita `CLAUDEX_CODEX_BIN` apenas como escape hatch de teste/dev para apontar
+  para um binario Codex especifico;
+- no pacote npm, `claudex` e launcher JS que delega para o mesmo payload nativo
+  do `codex`.
+
 ## Checks obrigatorios por tipo de mudanca
 
 Sempre:
