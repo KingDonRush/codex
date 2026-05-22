@@ -23,6 +23,7 @@ lock_file=""
 lock_dir=""
 path_action="already"
 path_profile=""
+persist_path="1"
 conflict_manager=""
 conflict_path=""
 lock_kind=""
@@ -51,6 +52,11 @@ configure_product() {
       release_repo="${CODEX_RELEASE_REPO:-openai/codex}"
       bin_dir="${CODEX_INSTALL_DIR:-$HOME/.local/bin}"
       product_home_dir="${CODEX_HOME:-$HOME/.codex}"
+      if [ -n "${CODEX_INSTALL_DIR:-}" ]; then
+        persist_path="0"
+      else
+        persist_path="1"
+      fi
       ;;
     claudex)
       product_name="Claudex"
@@ -61,6 +67,11 @@ configure_product() {
       release_repo="${CLAUDEX_RELEASE_REPO:-${CODEX_RELEASE_REPO:-KingDonRush/codex}}"
       bin_dir="${CLAUDEX_INSTALL_DIR:-${CODEX_INSTALL_DIR:-$HOME/.local/bin}}"
       product_home_dir="${CLAUDEX_HOME:-$HOME/.claudex}"
+      if [ -n "${CLAUDEX_INSTALL_DIR:-}" ] || [ -n "${CODEX_INSTALL_DIR:-}" ]; then
+        persist_path="0"
+      else
+        persist_path="1"
+      fi
       ;;
     *)
       echo "Unsupported install variant: $INSTALL_VARIANT" >&2
@@ -379,6 +390,11 @@ add_to_path() {
       ;;
   esac
 
+  if [ "$persist_path" != "1" ]; then
+    path_action="manual"
+    return
+  fi
+
   profile="$(pick_profile)"
   path_profile="$profile"
   begin_marker="# >>> $product_name installer >>>"
@@ -655,6 +671,10 @@ print_launch_instructions() {
       step "Current terminal: export PATH=\"$BIN_DIR:\$PATH\" && $command_name"
       step "Future terminals: open a new terminal and run: $command_name"
       step "PATH is already configured in $path_profile"
+      ;;
+    manual)
+      step "Current terminal: export PATH=\"$BIN_DIR:\$PATH\" && $command_name"
+      step "Future terminals: add $BIN_DIR to PATH before running: $command_name"
       ;;
     *)
       step "Current terminal: $command_name"
@@ -986,6 +1006,9 @@ case "$path_action" in
     print_launch_instructions
     ;;
   configured)
+    print_launch_instructions
+    ;;
+  manual)
     print_launch_instructions
     ;;
   *)

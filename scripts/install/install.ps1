@@ -760,18 +760,23 @@ if ($Variant.ToLowerInvariant() -eq "claudex") {
     if ([string]::IsNullOrWhiteSpace($env:CLAUDEX_INSTALL_DIR)) {
         if ([string]::IsNullOrWhiteSpace($env:CODEX_INSTALL_DIR)) {
             $visibleBinDir = $defaultVisibleBinDir
+            $persistPath = $true
         } else {
             $visibleBinDir = $env:CODEX_INSTALL_DIR
+            $persistPath = $false
         }
     } else {
         $visibleBinDir = $env:CLAUDEX_INSTALL_DIR
+        $persistPath = $false
     }
 } else {
     $defaultVisibleBinDir = Join-Path $env:LOCALAPPDATA "Programs\OpenAI\Codex\bin"
     if ([string]::IsNullOrWhiteSpace($env:CODEX_INSTALL_DIR)) {
         $visibleBinDir = $defaultVisibleBinDir
+        $persistPath = $true
     } else {
         $visibleBinDir = $env:CODEX_INSTALL_DIR
+        $persistPath = $false
     }
 }
 
@@ -915,7 +920,10 @@ try {
 Maybe-HandleConflictingInstall -Conflict $conflictingInstall
 
 $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-if (-not (Path-Contains -PathValue $userPath -Entry $visibleBinDir)) {
+if (-not $persistPath) {
+    Write-Step "Current PowerShell session: add $visibleBinDir to PATH before running: $CommandName"
+    Write-Step "Future PowerShell windows: add $visibleBinDir to PATH before running: $CommandName"
+} elseif (-not (Path-Contains -PathValue $userPath -Entry $visibleBinDir)) {
     if ([string]::IsNullOrWhiteSpace($userPath)) {
         $newUserPath = $visibleBinDir
     } else {
@@ -938,8 +946,10 @@ if (-not (Path-Contains -PathValue $env:Path -Entry $visibleBinDir)) {
     }
 }
 
-Write-Step "Current PowerShell session: $CommandName"
-Write-Step "Future PowerShell windows: open a new PowerShell window and run: $CommandName"
+if ($persistPath) {
+    Write-Step "Current PowerShell session: $CommandName"
+    Write-Step "Future PowerShell windows: open a new PowerShell window and run: $CommandName"
+}
 Write-Host "$ProductName CLI $resolvedVersion installed successfully."
 
 $codexCommand = Join-Path $visibleBinDir "$CommandName.exe"
