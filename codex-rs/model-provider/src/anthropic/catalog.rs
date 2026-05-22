@@ -75,7 +75,7 @@ fn claude_model(slug: &str, display_name: &str, description: &str, priority: i32
         experimental_supported_tools: Vec::new(),
         input_modalities: vec![InputModality::Text],
         used_fallback_model_metadata: false,
-        supports_search_tool: false,
+        supports_search_tool: true,
     }
 }
 
@@ -103,6 +103,6 @@ mod tests {
             ConfigShellToolType::ShellCommand
         );
         assert_eq!(catalog.models[0].apply_patch_tool_type, None);
-        assert!(!catalog.models[0].supports_search_tool);
+        assert!(catalog.models[0].supports_search_tool);
     }
 }

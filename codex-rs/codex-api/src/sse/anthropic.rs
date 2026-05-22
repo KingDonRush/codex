@@ -1,5 +1,6 @@
 mod event;
 
+use crate::anthropic_tool_names::AnthropicToolNameMap;
 use crate::common::ResponseEvent;
 use crate::common::ResponseStream;
 use crate::error::ApiError;
@@ -17,6 +18,7 @@ use event::AnthropicStreamEvent;
 use event::AnthropicUsageDelta;
 use eventsource_stream::Eventsource;
 use futures::StreamExt;
+use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::OnceLock;
@@ -28,12 +30,14 @@ use tracing::debug;
 use tracing::trace;
 
 const REQUEST_ID_HEADER: &str = "request-id";
+const INTERNAL_TOOL_SEARCH_NAME: &str = "tool_search";
 
 pub fn spawn_anthropic_messages_stream(
     stream_response: StreamResponse,
     idle_timeout: Duration,
     telemetry: Option<Arc<dyn SseTelemetry>>,
     _turn_state: Option<Arc<OnceLock<String>>>,
+    tool_name_map: AnthropicToolNameMap,
 ) -> ResponseStream {
     let upstream_request_id = stream_response
         .headers
@@ -42,7 +46,14 @@ pub fn spawn_anthropic_messages_stream(
         .map(str::to_string);
     let (tx_event, rx_event) = mpsc::channel::<Result<ResponseEvent, ApiError>>(1600);
     tokio::spawn(async move {
-        process_sse(stream_response.bytes, tx_event, idle_timeout, telemetry).await;
+        process_sse(
+            stream_response.bytes,
+            tx_event,
+            idle_timeout,
+            telemetry,
+            tool_name_map,
+        )
+        .await;
     });
 
     ResponseStream {
@@ -57,6 +68,15 @@ struct AnthropicStreamState {
     input_tokens: Option<i64>,
     output_tokens: Option<i64>,
     text_blocks: HashMap<usize, String>,
+    tool_blocks: HashMap<usize, AnthropicToolUseBlock>,
+    tool_name_map: AnthropicToolNameMap,
+}
+
+struct AnthropicToolUseBlock {
+    id: String,
+    name: String,
+    initial_input: Value,
+    input_json_delta: String,
 }
 
 impl AnthropicStreamState {
@@ -79,9 +99,36 @@ impl AnthropicStreamState {
         })
     }
 
+    fn start_tool_use_block(&mut self, index: usize, id: String, name: String, input: Value) {
+        self.tool_blocks.insert(
+            index,
+            AnthropicToolUseBlock {
+                id,
+                name,
+                initial_input: input,
+                input_json_delta: String::new(),
+            },
+        );
+    }
+
     fn append_text_delta(&mut self, index: usize, text: String) -> ResponseEvent {
         self.text_blocks.entry(index).or_default().push_str(&text);
         ResponseEvent::OutputTextDelta(text)
+    }
+
+    fn append_tool_input_delta(
+        &mut self,
+        index: usize,
+        partial_json: String,
+    ) -> Result<(), ApiError> {
+        let Some(block) = self.tool_blocks.get_mut(&index) else {
+            return Err(ApiError::Stream(format!(
+                "Anthropic input_json_delta received before tool_use start for block {index}",
+            )));
+        };
+
+        block.input_json_delta.push_str(&partial_json);
+        Ok(())
     }
 
     fn stop_text_block(&mut self, index: usize) -> Option<ResponseEvent> {
@@ -92,6 +139,56 @@ impl AnthropicStreamState {
             content: vec![ContentItem::OutputText { text }],
             phase: None,
         }))
+    }
+
+    fn stop_tool_use_block(&mut self, index: usize) -> Result<Option<ResponseEvent>, ApiError> {
+        let Some(block) = self.tool_blocks.remove(&index) else {
+            return Ok(None);
+        };
+
+        let arguments = block.arguments()?;
+        let tool_name = self.tool_name_map.resolve(&block.name).ok_or_else(|| {
+            ApiError::Stream(format!(
+                "Anthropic tool_use referenced unknown tool `{}`",
+                block.name
+            ))
+        })?;
+        if tool_name.namespace.is_none() && tool_name.name == INTERNAL_TOOL_SEARCH_NAME {
+            return Ok(Some(ResponseEvent::OutputItemDone(
+                ResponseItem::ToolSearchCall {
+                    id: Some(block.id.clone()),
+                    call_id: Some(block.id),
+                    status: None,
+                    execution: "client".to_string(),
+                    arguments: serde_json::from_str(&arguments).map_err(|err| {
+                        ApiError::Stream(format!(
+                            "Anthropic tool_search input is not valid JSON: {err}"
+                        ))
+                    })?,
+                },
+            )));
+        }
+        Ok(Some(ResponseEvent::OutputItemDone(
+            ResponseItem::FunctionCall {
+                id: Some(block.id.clone()),
+                name: tool_name.name,
+                namespace: tool_name.namespace,
+                arguments,
+                call_id: block.id,
+            },
+        )))
+    }
+
+    fn stop_content_block(&mut self, index: usize) -> Result<Option<ResponseEvent>, ApiError> {
+        if let Some(event) = self.stop_text_block(index) {
+            return Ok(Some(event));
+        }
+
+        if let Some(event) = self.stop_tool_use_block(index)? {
+            return Ok(Some(event));
+        }
+
+        Ok(None)
     }
 
     fn update_usage(&mut self, usage: Option<AnthropicUsageDelta>) {
@@ -123,6 +220,24 @@ impl AnthropicStreamState {
     }
 }
 
+impl AnthropicToolUseBlock {
+    fn arguments(&self) -> Result<String, ApiError> {
+        let arguments = if self.input_json_delta.is_empty() {
+            serde_json::to_string(&self.initial_input).map_err(|err| {
+                ApiError::Stream(format!("failed to encode Anthropic tool_use input: {err}"))
+            })?
+        } else {
+            self.input_json_delta.clone()
+        };
+
+        serde_json::from_str::<Value>(&arguments).map_err(|err| {
+            ApiError::Stream(format!("Anthropic tool_use input is not valid JSON: {err}"))
+        })?;
+
+        Ok(arguments)
+    }
+}
+
 fn process_anthropic_event(
     state: &mut AnthropicStreamState,
     event: AnthropicStreamEvent,
@@ -144,7 +259,11 @@ fn process_anthropic_event(
                 Some(AnthropicContentBlock::Text { text }) => {
                     Ok(Some(state.start_text_block(index, text)))
                 }
-                Some(_) | None => Ok(None),
+                Some(AnthropicContentBlock::ToolUse { id, name, input }) => {
+                    state.start_tool_use_block(index, id, name, input);
+                    Ok(None)
+                }
+                Some(AnthropicContentBlock::Other) | None => Ok(None),
             }
         }
         "content_block_delta" => {
@@ -161,7 +280,16 @@ fn process_anthropic_event(
                 Some(AnthropicDelta::TextDelta { text }) => {
                     Ok(Some(state.append_text_delta(index, text)))
                 }
-                Some(_) | None => Ok(None),
+                Some(AnthropicDelta::InputJsonDelta { partial_json }) => {
+                    state.append_tool_input_delta(index, partial_json)?;
+                    Ok(None)
+                }
+                Some(
+                    AnthropicDelta::ThinkingDelta {}
+                    | AnthropicDelta::SignatureDelta {}
+                    | AnthropicDelta::Other,
+                )
+                | None => Ok(None),
             }
         }
         "content_block_stop" => {
@@ -170,7 +298,7 @@ fn process_anthropic_event(
                     "Anthropic content_block_stop missing index".to_string(),
                 ));
             };
-            Ok(state.stop_text_block(index))
+            state.stop_content_block(index)
         }
         "message_delta" => {
             state.update_usage(event.usage);
@@ -191,9 +319,13 @@ pub async fn process_sse(
     tx_event: mpsc::Sender<Result<ResponseEvent, ApiError>>,
     idle_timeout: Duration,
     telemetry: Option<Arc<dyn SseTelemetry>>,
+    tool_name_map: AnthropicToolNameMap,
 ) {
     let mut stream = stream.eventsource();
-    let mut state = AnthropicStreamState::default();
+    let mut state = AnthropicStreamState {
+        tool_name_map,
+        ..Default::default()
+    };
 
     loop {
         let start = Instant::now();
@@ -281,6 +413,13 @@ mod tests {
     use tokio_util::io::ReaderStream;
 
     async fn collect_events(chunks: &[&[u8]]) -> Vec<Result<ResponseEvent, ApiError>> {
+        collect_events_with_tool_name_map(chunks, AnthropicToolNameMap::default()).await
+    }
+
+    async fn collect_events_with_tool_name_map(
+        chunks: &[&[u8]],
+        tool_name_map: AnthropicToolNameMap,
+    ) -> Vec<Result<ResponseEvent, ApiError>> {
         let mut builder = IoBuilder::new();
         for chunk in chunks {
             builder.read(chunk);
@@ -295,6 +434,7 @@ mod tests {
             tx,
             Duration::from_millis(1000),
             /*telemetry*/ None,
+            tool_name_map,
         ));
 
         let mut events = Vec::new();
@@ -372,17 +512,168 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn maps_anthropic_error() {
+    async fn parses_tool_use_stream() {
         let body = concat!(
-            "event: error\n",
-            "data: {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"bad request\"}}\n\n",
+            "event: message_start\n",
+            "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"usage\":{\"input_tokens\":10,\"output_tokens\":1}}}\n\n",
+            "event: content_block_start\n",
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_1\",\"name\":\"shell\",\"input\":{}}}\n\n",
+            "event: content_block_delta\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"cmd\\\":\\\"\"}}\n\n",
+            "event: content_block_delta\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"ls\\\"}\"}}\n\n",
+            "event: content_block_stop\n",
+            "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+            "event: message_stop\n",
+            "data: {\"type\":\"message_stop\"}\n\n",
         );
 
         let events = collect_events(&[body.as_bytes()]).await;
 
-        assert!(matches!(
-            &events[0],
-            Err(ApiError::InvalidRequest { message }) if message == "bad request"
-        ));
+        assert_eq!(events.len(), 3);
+        assert_matches!(events[0], Ok(ResponseEvent::Created));
+        assert_matches!(
+            &events[1],
+            Ok(ResponseEvent::OutputItemDone(ResponseItem::FunctionCall {
+                id: Some(id),
+                name,
+                namespace: None,
+                arguments,
+                call_id,
+            })) if id == "toolu_1"
+                && name == "shell"
+                && arguments == "{\"cmd\":\"ls\"}"
+                && call_id == "toolu_1"
+        );
+        assert_matches!(events[2], Ok(ResponseEvent::Completed { .. }));
+    }
+
+    #[tokio::test]
+    async fn parses_namespaced_tool_use_stream() {
+        let body = concat!(
+            "event: message_start\n",
+            "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"usage\":{\"input_tokens\":10,\"output_tokens\":1}}}\n\n",
+            "event: content_block_start\n",
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_1\",\"name\":\"mcp__demo__lookup_order\",\"input\":{\"order_id\":\"ord_1\"}}}\n\n",
+            "event: content_block_stop\n",
+            "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+            "event: message_stop\n",
+            "data: {\"type\":\"message_stop\"}\n\n",
+        );
+        let mut tool_name_map = AnthropicToolNameMap::default();
+        tool_name_map.register(Some("mcp__demo__".to_string()), "lookup_order".to_string());
+
+        let events = collect_events_with_tool_name_map(&[body.as_bytes()], tool_name_map).await;
+
+        assert_eq!(events.len(), 3);
+        assert_matches!(events[0], Ok(ResponseEvent::Created));
+        assert_matches!(
+            &events[1],
+            Ok(ResponseEvent::OutputItemDone(ResponseItem::FunctionCall {
+                name,
+                namespace: Some(namespace),
+                arguments,
+                ..
+            })) if name == "lookup_order"
+                && namespace == "mcp__demo__"
+                && arguments == "{\"order_id\":\"ord_1\"}"
+        );
+        assert_matches!(events[2], Ok(ResponseEvent::Completed { .. }));
+    }
+
+    #[tokio::test]
+    async fn parses_tool_search_tool_use_stream() {
+        let body = concat!(
+            "event: message_start\n",
+            "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"usage\":{\"input_tokens\":10,\"output_tokens\":1}}}\n\n",
+            "event: content_block_start\n",
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_search\",\"name\":\"codex_tool_search\",\"input\":{\"query\":\"calendar\",\"limit\":1}}}\n\n",
+            "event: content_block_stop\n",
+            "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+            "event: message_stop\n",
+            "data: {\"type\":\"message_stop\"}\n\n",
+        );
+        let mut tool_name_map = AnthropicToolNameMap::default();
+        tool_name_map.register_with_anthropic_name(
+            None,
+            "tool_search".to_string(),
+            "codex_tool_search",
+        );
+
+        let events = collect_events_with_tool_name_map(&[body.as_bytes()], tool_name_map).await;
+
+        assert_eq!(events.len(), 3);
+        assert_matches!(events[0], Ok(ResponseEvent::Created));
+        assert_matches!(
+            &events[1],
+            Ok(ResponseEvent::OutputItemDone(ResponseItem::ToolSearchCall {
+                call_id: Some(call_id),
+                execution,
+                arguments,
+                ..
+            })) if call_id == "toolu_search"
+                && execution == "client"
+                && arguments == &serde_json::json!({"query": "calendar", "limit": 1})
+        );
+        assert_matches!(events[2], Ok(ResponseEvent::Completed { .. }));
+    }
+
+    #[tokio::test]
+    async fn errors_on_unknown_mapped_tool_use_name() {
+        let body = concat!(
+            "event: message_start\n",
+            "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"usage\":{\"input_tokens\":10,\"output_tokens\":1}}}\n\n",
+            "event: content_block_start\n",
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_1\",\"name\":\"unknown_tool\",\"input\":{}}}\n\n",
+            "event: content_block_stop\n",
+            "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+        );
+        let mut tool_name_map = AnthropicToolNameMap::default();
+        tool_name_map.register(None, "known_tool".to_string());
+
+        let events = collect_events_with_tool_name_map(&[body.as_bytes()], tool_name_map).await;
+
+        assert_eq!(events.len(), 2);
+        assert_matches!(events[0], Ok(ResponseEvent::Created));
+        assert_matches!(
+            &events[1],
+            Err(ApiError::Stream(message)) if message.contains("unknown tool")
+        );
+    }
+
+    #[tokio::test]
+    async fn errors_on_invalid_tool_use_json() {
+        let body = concat!(
+            "event: message_start\n",
+            "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"usage\":{\"input_tokens\":10,\"output_tokens\":1}}}\n\n",
+            "event: content_block_start\n",
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_1\",\"name\":\"shell\",\"input\":{}}}\n\n",
+            "event: content_block_delta\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"cmd\\\"\"}}\n\n",
+            "event: content_block_stop\n",
+            "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+        );
+
+        let events = collect_events(&[body.as_bytes()]).await;
+
+        assert_eq!(events.len(), 2);
+        assert_matches!(events[0], Ok(ResponseEvent::Created));
+        assert_matches!(
+            &events[1],
+            Err(ApiError::Stream(message)) if message.contains("tool_use input is not valid JSON")
+        );
+    }
+
+    #[tokio::test]
+    async fn maps_stream_error() {
+        let body = concat!(
+            "event: error\n",
+            "data: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}\n\n",
+        );
+
+        let events = collect_events(&[body.as_bytes()]).await;
+
+        assert_eq!(events.len(), 1);
+        assert_matches!(events[0], Err(ApiError::ServerOverloaded));
     }
 }
