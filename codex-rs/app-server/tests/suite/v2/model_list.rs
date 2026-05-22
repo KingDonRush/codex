@@ -102,6 +102,7 @@ async fn list_models_returns_all_models_with_large_limit() -> Result<()> {
 
     let request_id = mcp
         .send_list_models_request(ModelListParams {
+            model_provider: None,
             limit: Some(100),
             cursor: None,
             include_hidden: None,
@@ -136,6 +137,7 @@ async fn list_models_includes_hidden_models() -> Result<()> {
 
     let request_id = mcp
         .send_list_models_request(ModelListParams {
+            model_provider: None,
             limit: Some(100),
             cursor: None,
             include_hidden: Some(true),
@@ -220,6 +222,7 @@ openai_base_url = "{server_uri}/v1"
 
     let request_id = mcp
         .send_list_models_request(ModelListParams {
+            model_provider: None,
             limit: Some(100),
             cursor: None,
             include_hidden: None,
@@ -266,6 +269,42 @@ async fn list_models_uses_anthropic_static_catalog() -> Result<()> {
 
     let request_id = mcp
         .send_list_models_request(ModelListParams {
+            model_provider: None,
+            limit: Some(100),
+            cursor: None,
+            include_hidden: None,
+        })
+        .await?;
+
+    let response: JSONRPCResponse = timeout(
+        DEFAULT_TIMEOUT,
+        mcp.read_stream_until_response_message(RequestId::Integer(request_id)),
+    )
+    .await??;
+
+    let ModelListResponse {
+        data: items,
+        next_cursor,
+    } = to_response::<ModelListResponse>(response)?;
+
+    assert_eq!(items.len(), 3);
+    assert_eq!(items[0].id, ANTHROPIC_DEFAULT_MODEL_ID);
+    assert_eq!(items[0].model, ANTHROPIC_DEFAULT_MODEL_ID);
+    assert!(items[0].is_default);
+    assert!(items.iter().all(|item| !item.hidden));
+    assert!(next_cursor.is_none());
+    Ok(())
+}
+
+#[tokio::test]
+async fn list_models_uses_explicit_model_provider() -> Result<()> {
+    let codex_home = TempDir::new()?;
+    let mut mcp = McpProcess::new(codex_home.path()).await?;
+    timeout(DEFAULT_TIMEOUT, mcp.initialize()).await??;
+
+    let request_id = mcp
+        .send_list_models_request(ModelListParams {
+            model_provider: Some("anthropic".to_string()),
             limit: Some(100),
             cursor: None,
             include_hidden: None,
@@ -307,6 +346,7 @@ async fn list_models_pagination_works() -> Result<()> {
     for _ in 0..expected_models.len() {
         let request_id = mcp
             .send_list_models_request(ModelListParams {
+                model_provider: None,
                 limit: Some(1),
                 cursor: cursor.clone(),
                 include_hidden: None,
@@ -351,6 +391,7 @@ async fn list_models_rejects_invalid_cursor() -> Result<()> {
 
     let request_id = mcp
         .send_list_models_request(ModelListParams {
+            model_provider: None,
             limit: None,
             cursor: Some("invalid".to_string()),
             include_hidden: None,

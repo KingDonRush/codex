@@ -6,6 +6,7 @@ use crate::config_manager::ConfigManager;
 use crate::error_code::INPUT_TOO_LARGE_ERROR_CODE;
 use crate::error_code::invalid_params;
 use crate::models::supported_models;
+use crate::models::supported_models_from_manager;
 use crate::outgoing_message::ConnectionId;
 use crate::outgoing_message::ConnectionRequestId;
 use crate::outgoing_message::OutgoingMessageSender;

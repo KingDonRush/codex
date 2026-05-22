@@ -24,6 +24,7 @@ use codex_app_server_protocol::ExperimentalFeatureEnablementSetParams;
 use codex_app_server_protocol::ExperimentalFeatureEnablementSetResponse;
 use codex_app_server_protocol::JSONRPCErrorError;
 use codex_app_server_protocol::ManagedHooksRequirements;
+use codex_app_server_protocol::ModelProviderCapabilitiesReadParams;
 use codex_app_server_protocol::ModelProviderCapabilitiesReadResponse;
 use codex_app_server_protocol::NetworkDomainPermission;
 use codex_app_server_protocol::NetworkRequirements;
@@ -168,9 +169,20 @@ impl ConfigRequestProcessor {
 
     pub(crate) async fn model_provider_capabilities_read(
         &self,
+        params: ModelProviderCapabilitiesReadParams,
     ) -> Result<ModelProviderCapabilitiesReadResponse, JSONRPCErrorError> {
         let config = self.load_latest_config(/*fallback_cwd*/ None).await?;
-        let provider = create_model_provider(config.model_provider, /*auth_manager*/ None);
+        let provider_info = match params.model_provider {
+            Some(model_provider_id) => config
+                .model_providers
+                .get(&model_provider_id)
+                .ok_or_else(|| {
+                    invalid_request(format!("model provider `{model_provider_id}` not found"))
+                })?
+                .clone(),
+            None => config.model_provider,
+        };
+        let provider = create_model_provider(provider_info, /*auth_manager*/ None);
         let capabilities = provider.capabilities();
         Ok(ModelProviderCapabilitiesReadResponse {
             namespace_tools: capabilities.namespace_tools,

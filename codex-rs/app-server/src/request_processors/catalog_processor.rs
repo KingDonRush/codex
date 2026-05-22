@@ -142,7 +142,7 @@ impl CatalogRequestProcessor {
         &self,
         params: ModelListParams,
     ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
-        Self::list_models(self.thread_manager.clone(), params)
+        self.list_models(self.thread_manager.clone(), params)
             .await
             .map(|response| Some(response.into()))
     }
@@ -231,15 +231,19 @@ impl CatalogRequestProcessor {
     }
 
     async fn list_models(
+        &self,
         thread_manager: Arc<ThreadManager>,
         params: ModelListParams,
     ) -> Result<ModelListResponse, JSONRPCErrorError> {
         let ModelListParams {
+            model_provider,
             limit,
             cursor,
             include_hidden,
         } = params;
-        let models = supported_models(thread_manager, include_hidden.unwrap_or(false)).await;
+        let models = self
+            .supported_models_for_request(thread_manager, model_provider, include_hidden)
+            .await?;
         let total = models.len();
 
         if total == 0 {
@@ -275,6 +279,33 @@ impl CatalogRequestProcessor {
             data: items,
             next_cursor,
         })
+    }
+
+    async fn supported_models_for_request(
+        &self,
+        thread_manager: Arc<ThreadManager>,
+        model_provider: Option<String>,
+        include_hidden: Option<bool>,
+    ) -> Result<Vec<codex_app_server_protocol::Model>, JSONRPCErrorError> {
+        let include_hidden = include_hidden.unwrap_or(false);
+        let Some(model_provider_id) = model_provider else {
+            return Ok(supported_models(thread_manager, include_hidden).await);
+        };
+
+        let config = self.load_latest_config(/*fallback_cwd*/ None).await?;
+        let provider = config
+            .model_providers
+            .get(&model_provider_id)
+            .ok_or_else(|| {
+                invalid_request(format!("model provider `{model_provider_id}` not found"))
+            })?
+            .clone();
+        let models_manager = create_model_provider(provider, Some(Arc::clone(&self.auth_manager)))
+            .models_manager(
+                config.codex_home.to_path_buf(),
+                config.model_catalog.clone(),
+            );
+        Ok(supported_models_from_manager(models_manager, include_hidden).await)
     }
 
     async fn list_collaboration_modes(

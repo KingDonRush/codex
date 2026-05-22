@@ -23,6 +23,13 @@
         "integer",
         "null"
       ]
+    },
+    "modelProvider": {
+      "description": "Optional provider id from the configured `model_providers` map. Omitted uses the active provider selected when the app-server was started.",
+      "type": [
+        "string",
+        "null"
+      ]
     }
   },
   "title": "ModelListParams",
