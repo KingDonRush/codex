@@ -799,6 +799,11 @@ client_request_definitions! {
         serialization: None,
         response: v2::ModelProviderCapabilitiesReadResponse,
     },
+    ModelProviderList => "modelProvider/list" {
+        params: v2::ModelProviderListParams,
+        serialization: None,
+        response: v2::ModelProviderListResponse,
+    },
     ExperimentalFeatureList => "experimentalFeature/list" {
         params: v2::ExperimentalFeatureListParams,
         serialization: global("config"),
@@ -2612,6 +2617,26 @@ mod tests {
                 "id": 7,
                 "params": {
                     "modelProvider": null
+                }
+            }),
+            serde_json::to_value(&request)?,
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn serialize_model_provider_list() -> Result<()> {
+        let request = ClientRequest::ModelProviderList {
+            request_id: RequestId::Integer(8),
+            params: v2::ModelProviderListParams::default(),
+        };
+        assert_eq!(
+            json!({
+                "method": "modelProvider/list",
+                "id": 8,
+                "params": {
+                    "cursor": null,
+                    "limit": null
                 }
             }),
             serde_json::to_value(&request)?,
