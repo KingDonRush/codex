@@ -1044,10 +1044,10 @@ Estado da Fase 1:
 
 ## Claudex launcher isolado
 
-`claudex` e um entrypoint separado para rodar o mesmo binario Codex sem
-compartilhar estado com o Codex normal. Ele resolve `CLAUDEX_HOME` e injeta esse
-valor como `CODEX_HOME` no processo filho; se `CLAUDEX_HOME` nao existir, usa
-`~/.claudex`.
+`claudex` e um software separado do ponto de vista de instalacao e identidade:
+tem entrypoint nativo, pacote npm meta proprio e home proprio. Ele resolve
+`CLAUDEX_HOME` e injeta esse valor como `CODEX_HOME` no processo filho; se
+`CLAUDEX_HOME` nao existir, usa `~/.claudex`.
 
 Uso esperado:
 
@@ -1063,8 +1063,10 @@ Contratos:
 - cria o diretorio de home antes de iniciar o processo filho;
 - aceita `CLAUDEX_CODEX_BIN` apenas como escape hatch de teste/dev para apontar
   para um binario Codex especifico;
-- no pacote npm, `claudex` e launcher JS que delega para o mesmo payload nativo
-  do `codex`.
+- o pacote npm `claudex` expoe somente o bin `claudex`;
+- o pacote `@openai/codex` nao expoe `claudex`;
+- o package builder tambem aceita `--variant claudex` para criar pacote nativo
+  com `bin/claudex`.
 
 ## Checks obrigatorios por tipo de mudanca
 
