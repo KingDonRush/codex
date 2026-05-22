@@ -12,6 +12,7 @@ command_name=""
 package_asset_prefix=""
 npm_package_name=""
 legacy_platform_npm_prefix=""
+release_repo=""
 bin_dir=""
 bin_path=""
 product_home_dir=""
@@ -47,6 +48,7 @@ configure_product() {
       package_asset_prefix="codex"
       npm_package_name="@openai/codex"
       legacy_platform_npm_prefix="codex"
+      release_repo="${CODEX_RELEASE_REPO:-openai/codex}"
       bin_dir="${CODEX_INSTALL_DIR:-$HOME/.local/bin}"
       product_home_dir="${CODEX_HOME:-$HOME/.codex}"
       ;;
@@ -56,6 +58,7 @@ configure_product() {
       package_asset_prefix="claudex"
       npm_package_name="claudex"
       legacy_platform_npm_prefix=""
+      release_repo="${CLAUDEX_RELEASE_REPO:-${CODEX_RELEASE_REPO:-KingDonRush/codex}}"
       bin_dir="${CLAUDEX_INSTALL_DIR:-${CODEX_INSTALL_DIR:-$HOME/.local/bin}}"
       product_home_dir="${CLAUDEX_HOME:-$HOME/.claudex}"
       ;;
@@ -179,13 +182,13 @@ release_url_for_asset() {
   asset="$1"
   resolved_version="$2"
 
-  printf 'https://github.com/openai/codex/releases/download/rust-v%s/%s\n' "$resolved_version" "$asset"
+  printf 'https://github.com/%s/releases/download/rust-v%s/%s\n' "$release_repo" "$resolved_version" "$asset"
 }
 
 release_metadata_url() {
   resolved_version="$1"
 
-  printf 'https://api.github.com/repos/openai/codex/releases/tags/rust-v%s\n' "$resolved_version"
+  printf 'https://api.github.com/repos/%s/releases/tags/rust-v%s\n' "$release_repo" "$resolved_version"
 }
 
 release_asset_digest_or_empty() {
@@ -333,7 +336,7 @@ resolve_version() {
     return
   fi
 
-  release_json="$(download_text "https://api.github.com/repos/openai/codex/releases/latest")"
+  release_json="$(download_text "https://api.github.com/repos/$release_repo/releases/latest")"
   resolved="$(printf '%s\n' "$release_json" | sed -n 's/.*"tag_name":[[:space:]]*"rust-v\([^"]*\)".*/\1/p' | head -n 1)"
 
   if [ -z "$resolved" ]; then

@@ -26,6 +26,11 @@ switch ($Variant.ToLowerInvariant()) {
         $PackageAssetPrefix = "codex"
         $NpmPackageName = "@openai/codex"
         $LegacyPlatformNpmPrefix = "codex"
+        $ReleaseRepo = if ([string]::IsNullOrWhiteSpace($env:CODEX_RELEASE_REPO)) {
+            "openai/codex"
+        } else {
+            $env:CODEX_RELEASE_REPO
+        }
     }
     "claudex" {
         $ProductName = "Claudex"
@@ -33,6 +38,13 @@ switch ($Variant.ToLowerInvariant()) {
         $PackageAssetPrefix = "claudex"
         $NpmPackageName = "claudex"
         $LegacyPlatformNpmPrefix = ""
+        $ReleaseRepo = if (-not [string]::IsNullOrWhiteSpace($env:CLAUDEX_RELEASE_REPO)) {
+            $env:CLAUDEX_RELEASE_REPO
+        } elseif (-not [string]::IsNullOrWhiteSpace($env:CODEX_RELEASE_REPO)) {
+            $env:CODEX_RELEASE_REPO
+        } else {
+            "KingDonRush/codex"
+        }
     }
     default {
         throw "Unsupported install variant: $Variant"
@@ -94,7 +106,7 @@ function Find-ReleaseAssetMetadata {
         [string]$ResolvedVersion
     )
 
-    $release = Invoke-RestMethod -Uri "https://api.github.com/repos/openai/codex/releases/tags/rust-v$ResolvedVersion"
+    $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$ReleaseRepo/releases/tags/rust-v$ResolvedVersion"
     $asset = $release.assets | Where-Object { $_.name -eq $AssetName } | Select-Object -First 1
     if ($null -eq $asset) {
         return $null
@@ -219,7 +231,7 @@ function Resolve-Version {
         return $normalizedVersion
     }
 
-    $release = Invoke-RestMethod -Uri "https://api.github.com/repos/openai/codex/releases/latest"
+    $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$ReleaseRepo/releases/latest"
     if (-not $release.tag_name) {
         Write-Error "Failed to resolve the latest $ProductName release version."
         exit 1
