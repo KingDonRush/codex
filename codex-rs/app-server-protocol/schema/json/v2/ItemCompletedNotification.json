@@ -1006,6 +1006,9 @@
             "query": {
               "type": "string"
             },
+            "results": {
+              "default": null
+            },
             "type": {
               "enum": [
                 "webSearch"

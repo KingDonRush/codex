@@ -870,6 +870,10 @@ pub enum ResponseItem {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
         action: Option<WebSearchAction>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        #[ts(type = "unknown")]
+        results: Option<serde_json::Value>,
     },
     // Emitted by the Responses API when the agent triggers image generation.
     // Example payload:
@@ -2600,6 +2604,7 @@ mod tests {
                 id: expected_id.clone(),
                 status: expected_status.clone(),
                 action: expected_action.clone(),
+                results: None,
             };
             assert_eq!(parsed, expected);
 
@@ -2611,6 +2616,47 @@ mod tests {
             assert_eq!(serialized, expected_serialized);
         }
 
+        Ok(())
+    }
+
+    #[test]
+    fn web_search_call_preserves_results_payload() -> Result<()> {
+        let json_literal = r#"{
+            "type": "web_search_call",
+            "status": "completed",
+            "action": {
+                "type": "search",
+                "query": "weather seattle"
+            },
+            "results": [
+                {
+                    "type": "web_search_result",
+                    "title": "Seattle forecast",
+                    "url": "https://example.com/weather"
+                }
+            ]
+        }"#;
+
+        let parsed: ResponseItem = serde_json::from_str(json_literal)?;
+
+        assert_eq!(
+            parsed,
+            ResponseItem::WebSearchCall {
+                id: None,
+                status: Some("completed".into()),
+                action: Some(WebSearchAction::Search {
+                    query: Some("weather seattle".into()),
+                    queries: None,
+                }),
+                results: Some(serde_json::json!([
+                    {
+                        "type": "web_search_result",
+                        "title": "Seattle forecast",
+                        "url": "https://example.com/weather"
+                    }
+                ])),
+            }
+        );
         Ok(())
     }
 

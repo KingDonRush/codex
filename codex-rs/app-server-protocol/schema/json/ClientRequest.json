@@ -2409,6 +2409,7 @@
               ],
               "writeOnly": true
             },
+            "results": true,
             "status": {
               "type": [
                 "string",

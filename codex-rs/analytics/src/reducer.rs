@@ -1866,7 +1866,9 @@ fn tool_item_event(input: ToolItemEventInput<'_>) -> Option<TrackEventRequest> {
                 },
             ))
         }
-        ThreadItem::WebSearch { id, query, action } => {
+        ThreadItem::WebSearch {
+            id, query, action, ..
+        } => {
             let base = tool_item_base(
                 thread_id,
                 turn_id,

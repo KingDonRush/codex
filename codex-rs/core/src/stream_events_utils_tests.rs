@@ -52,6 +52,7 @@ fn external_context_pollution_items_include_web_search_and_tool_search() {
             id: None,
             status: Some("completed".to_string()),
             action: None,
+            results: None,
         },
         ResponseItem::ToolSearchCall {
             id: None,

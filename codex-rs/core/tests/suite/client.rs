@@ -2368,6 +2368,7 @@ async fn azure_responses_request_includes_store_and_reasoning_ids() {
             query: Some("weather".into()),
             queries: None,
         }),
+        results: None,
     });
     prompt.input.push(ResponseItem::FunctionCall {
         id: Some("function-id".into()),

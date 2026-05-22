@@ -296,6 +296,10 @@ pub struct WebSearchItem {
     pub id: String,
     pub query: String,
     pub action: WebSearchAction,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    #[ts(type = "unknown")]
+    pub results: Option<JsonValue>,
 }
 
 /// An error notification.

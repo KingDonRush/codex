@@ -9,6 +9,7 @@ use codex_client::ByteStream;
 use codex_client::StreamResponse;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
+use codex_protocol::models::WebSearchAction;
 use codex_protocol::protocol::TokenUsage;
 use event::AnthropicContentBlock;
 use event::AnthropicDelta;
@@ -69,6 +70,8 @@ struct AnthropicStreamState {
     output_tokens: Option<i64>,
     text_blocks: HashMap<usize, String>,
     tool_blocks: HashMap<usize, AnthropicToolUseBlock>,
+    server_tool_blocks: HashMap<usize, AnthropicToolUseBlock>,
+    pending_web_searches: HashMap<String, WebSearchAction>,
     tool_name_map: AnthropicToolNameMap,
 }
 
@@ -111,6 +114,39 @@ impl AnthropicStreamState {
         );
     }
 
+    fn start_server_tool_use_block(
+        &mut self,
+        index: usize,
+        id: String,
+        name: String,
+        input: Value,
+    ) {
+        self.server_tool_blocks.insert(
+            index,
+            AnthropicToolUseBlock {
+                id,
+                name,
+                initial_input: input,
+                input_json_delta: String::new(),
+            },
+        );
+    }
+
+    fn start_web_search_tool_result(
+        &mut self,
+        tool_use_id: String,
+        content: Value,
+    ) -> ResponseEvent {
+        let action = self.pending_web_searches.remove(&tool_use_id);
+        let results = (!content.is_null()).then_some(content);
+        ResponseEvent::OutputItemDone(ResponseItem::WebSearchCall {
+            id: Some(tool_use_id),
+            status: Some("completed".to_string()),
+            action,
+            results,
+        })
+    }
+
     fn append_text_delta(&mut self, index: usize, text: String) -> ResponseEvent {
         self.text_blocks.entry(index).or_default().push_str(&text);
         ResponseEvent::OutputTextDelta(text)
@@ -122,6 +158,11 @@ impl AnthropicStreamState {
         partial_json: String,
     ) -> Result<(), ApiError> {
         let Some(block) = self.tool_blocks.get_mut(&index) else {
+            if let Some(block) = self.server_tool_blocks.get_mut(&index) {
+                block.input_json_delta.push_str(&partial_json);
+                return Ok(());
+            }
+
             return Err(ApiError::Stream(format!(
                 "Anthropic input_json_delta received before tool_use start for block {index}",
             )));
@@ -179,6 +220,22 @@ impl AnthropicStreamState {
         )))
     }
 
+    fn stop_server_tool_use_block(
+        &mut self,
+        index: usize,
+    ) -> Result<Option<ResponseEvent>, ApiError> {
+        let Some(block) = self.server_tool_blocks.remove(&index) else {
+            return Ok(None);
+        };
+
+        if block.name == "web_search" {
+            let action = block.web_search_action()?;
+            self.pending_web_searches.insert(block.id, action);
+        }
+
+        Ok(None)
+    }
+
     fn stop_content_block(&mut self, index: usize) -> Result<Option<ResponseEvent>, ApiError> {
         if let Some(event) = self.stop_text_block(index) {
             return Ok(Some(event));
@@ -188,7 +245,7 @@ impl AnthropicStreamState {
             return Ok(Some(event));
         }
 
-        Ok(None)
+        self.stop_server_tool_use_block(index)
     }
 
     fn update_usage(&mut self, usage: Option<AnthropicUsageDelta>) {
@@ -236,6 +293,26 @@ impl AnthropicToolUseBlock {
 
         Ok(arguments)
     }
+
+    fn arguments_value(&self, context: &str) -> Result<Value, ApiError> {
+        let arguments = self.arguments()?;
+        serde_json::from_str::<Value>(&arguments).map_err(|err| {
+            ApiError::Stream(format!(
+                "Anthropic {context} input is not valid JSON: {err}"
+            ))
+        })
+    }
+
+    fn web_search_action(&self) -> Result<WebSearchAction, ApiError> {
+        let arguments = self.arguments_value("web_search")?;
+        Ok(WebSearchAction::Search {
+            query: arguments
+                .get("query")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            queries: None,
+        })
+    }
 }
 
 fn process_anthropic_event(
@@ -263,6 +340,16 @@ fn process_anthropic_event(
                     state.start_tool_use_block(index, id, name, input);
                     Ok(None)
                 }
+                Some(AnthropicContentBlock::ServerToolUse { id, name, input }) => {
+                    state.start_server_tool_use_block(index, id, name, input);
+                    Ok(None)
+                }
+                Some(AnthropicContentBlock::WebSearchToolResult {
+                    tool_use_id,
+                    content,
+                }) => Ok(Some(
+                    state.start_web_search_tool_result(tool_use_id, content),
+                )),
                 Some(AnthropicContentBlock::Other) | None => Ok(None),
             }
         }
@@ -616,6 +703,58 @@ mod tests {
                 && arguments == &serde_json::json!({"query": "calendar", "limit": 1})
         );
         assert_matches!(events[2], Ok(ResponseEvent::Completed { .. }));
+    }
+
+    #[tokio::test]
+    async fn parses_web_search_server_tool_stream() {
+        let body = concat!(
+            "event: message_start\n",
+            "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"usage\":{\"input_tokens\":10,\"output_tokens\":1}}}\n\n",
+            "event: content_block_start\n",
+            "data: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"server_tool_use\",\"id\":\"srvtoolu_1\",\"name\":\"web_search\",\"input\":{}}}\n\n",
+            "event: content_block_delta\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"query\\\":\\\"\"}}\n\n",
+            "event: content_block_delta\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"latest codex news\\\"}\"}}\n\n",
+            "event: content_block_stop\n",
+            "data: {\"type\":\"content_block_stop\",\"index\":1}\n\n",
+            "event: content_block_start\n",
+            "data: {\"type\":\"content_block_start\",\"index\":2,\"content_block\":{\"type\":\"web_search_tool_result\",\"tool_use_id\":\"srvtoolu_1\",\"content\":[{\"type\":\"web_search_result\",\"title\":\"Codex\",\"url\":\"https://example.com\"}]}}\n\n",
+            "event: content_block_start\n",
+            "data: {\"type\":\"content_block_start\",\"index\":3,\"content_block\":{\"type\":\"text\",\"text\":\"Found it\"}}\n\n",
+            "event: content_block_stop\n",
+            "data: {\"type\":\"content_block_stop\",\"index\":3}\n\n",
+            "event: message_stop\n",
+            "data: {\"type\":\"message_stop\"}\n\n",
+        );
+
+        let events = collect_events(&[body.as_bytes()]).await;
+
+        assert_eq!(events.len(), 5);
+        assert_matches!(events[0], Ok(ResponseEvent::Created));
+        assert_matches!(
+            &events[1],
+            Ok(ResponseEvent::OutputItemDone(ResponseItem::WebSearchCall {
+                id: Some(id),
+                status: Some(status),
+                action: Some(WebSearchAction::Search { query: Some(query), queries: None }),
+                results: Some(results),
+            })) if id == "srvtoolu_1"
+                && status == "completed"
+                && query == "latest codex news"
+                && results == &serde_json::json!([{
+                    "type": "web_search_result",
+                    "title": "Codex",
+                    "url": "https://example.com"
+                }])
+        );
+        assert_matches!(events[2], Ok(ResponseEvent::OutputItemAdded(_)));
+        assert_matches!(
+            &events[3],
+            Ok(ResponseEvent::OutputItemDone(ResponseItem::Message { content, .. }))
+                if content == &vec![ContentItem::OutputText { text: "Found it".to_string() }]
+        );
+        assert_matches!(events[4], Ok(ResponseEvent::Completed { .. }));
     }
 
     #[tokio::test]
