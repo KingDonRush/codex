@@ -1484,6 +1484,30 @@
             },
             "method": {
               "enum": [
+                "modelProvider/list"
+              ],
+              "title": "ModelProvider/listRequestMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/v2/ModelProviderListParams"
+            }
+          },
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "title": "ModelProvider/listRequest",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/v2/RequestId"
+            },
+            "method": {
+              "enum": [
                 "experimentalFeature/list"
               ],
               "title": "ExperimentalFeature/listRequestMethod",
@@ -11508,6 +11532,25 @@
         "title": "ModelListResponse",
         "type": "object"
       },
+      "ModelProviderCapabilities": {
+        "properties": {
+          "imageGeneration": {
+            "type": "boolean"
+          },
+          "namespaceTools": {
+            "type": "boolean"
+          },
+          "webSearch": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "imageGeneration",
+          "namespaceTools",
+          "webSearch"
+        ],
+        "type": "object"
+      },
       "ModelProviderCapabilitiesReadParams": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "properties": {
@@ -11541,6 +11584,136 @@
           "webSearch"
         ],
         "title": "ModelProviderCapabilitiesReadResponse",
+        "type": "object"
+      },
+      "ModelProviderEnvHttpHeader": {
+        "properties": {
+          "envVar": {
+            "type": "string"
+          },
+          "header": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "envVar",
+          "header"
+        ],
+        "type": "object"
+      },
+      "ModelProviderListParams": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "cursor": {
+            "description": "Opaque pagination cursor returned by a previous call.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "limit": {
+            "description": "Optional page size; defaults to all configured providers.",
+            "format": "uint32",
+            "minimum": 0.0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "title": "ModelProviderListParams",
+        "type": "object"
+      },
+      "ModelProviderListResponse": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/definitions/v2/ModelProviderSummary"
+            },
+            "type": "array"
+          },
+          "nextCursor": {
+            "description": "Opaque cursor to pass to the next call to continue after the last item. If None, there are no more items to return.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "ModelProviderListResponse",
+        "type": "object"
+      },
+      "ModelProviderSummary": {
+        "properties": {
+          "baseUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "capabilities": {
+            "$ref": "#/definitions/v2/ModelProviderCapabilities"
+          },
+          "envHttpHeaders": {
+            "items": {
+              "$ref": "#/definitions/v2/ModelProviderEnvHttpHeader"
+            },
+            "type": "array"
+          },
+          "envKey": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "hasCommandAuth": {
+            "type": "boolean"
+          },
+          "hasStaticBearerToken": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "isActive": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "requiresOpenaiAuth": {
+            "type": "boolean"
+          },
+          "staticHttpHeaders": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "supportsWebsockets": {
+            "type": "boolean"
+          },
+          "wireApi": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "capabilities",
+          "envHttpHeaders",
+          "hasCommandAuth",
+          "hasStaticBearerToken",
+          "id",
+          "isActive",
+          "name",
+          "requiresOpenaiAuth",
+          "staticHttpHeaders",
+          "supportsWebsockets",
+          "wireApi"
+        ],
         "type": "object"
       },
       "ModelRerouteReason": {

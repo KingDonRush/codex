@@ -1,0 +1,128 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "ModelProviderCapabilities": {
+      "properties": {
+        "imageGeneration": {
+          "type": "boolean"
+        },
+        "namespaceTools": {
+          "type": "boolean"
+        },
+        "webSearch": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "imageGeneration",
+        "namespaceTools",
+        "webSearch"
+      ],
+      "type": "object"
+    },
+    "ModelProviderEnvHttpHeader": {
+      "properties": {
+        "envVar": {
+          "type": "string"
+        },
+        "header": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "envVar",
+        "header"
+      ],
+      "type": "object"
+    },
+    "ModelProviderSummary": {
+      "properties": {
+        "baseUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "capabilities": {
+          "$ref": "#/definitions/ModelProviderCapabilities"
+        },
+        "envHttpHeaders": {
+          "items": {
+            "$ref": "#/definitions/ModelProviderEnvHttpHeader"
+          },
+          "type": "array"
+        },
+        "envKey": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hasCommandAuth": {
+          "type": "boolean"
+        },
+        "hasStaticBearerToken": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "isActive": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "requiresOpenaiAuth": {
+          "type": "boolean"
+        },
+        "staticHttpHeaders": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "supportsWebsockets": {
+          "type": "boolean"
+        },
+        "wireApi": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "capabilities",
+        "envHttpHeaders",
+        "hasCommandAuth",
+        "hasStaticBearerToken",
+        "id",
+        "isActive",
+        "name",
+        "requiresOpenaiAuth",
+        "staticHttpHeaders",
+        "supportsWebsockets",
+        "wireApi"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "data": {
+      "items": {
+        "$ref": "#/definitions/ModelProviderSummary"
+      },
+      "type": "array"
+    },
+    "nextCursor": {
+      "description": "Opaque cursor to pass to the next call to continue after the last item. If None, there are no more items to return.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "data"
+  ],
+  "title": "ModelProviderListResponse",
+  "type": "object"
+}

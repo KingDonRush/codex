@@ -24,8 +24,13 @@ use codex_app_server_protocol::ExperimentalFeatureEnablementSetParams;
 use codex_app_server_protocol::ExperimentalFeatureEnablementSetResponse;
 use codex_app_server_protocol::JSONRPCErrorError;
 use codex_app_server_protocol::ManagedHooksRequirements;
+use codex_app_server_protocol::ModelProviderCapabilities;
 use codex_app_server_protocol::ModelProviderCapabilitiesReadParams;
 use codex_app_server_protocol::ModelProviderCapabilitiesReadResponse;
+use codex_app_server_protocol::ModelProviderEnvHttpHeader;
+use codex_app_server_protocol::ModelProviderListParams;
+use codex_app_server_protocol::ModelProviderListResponse;
+use codex_app_server_protocol::ModelProviderSummary;
 use codex_app_server_protocol::NetworkDomainPermission;
 use codex_app_server_protocol::NetworkRequirements;
 use codex_app_server_protocol::NetworkUnixSocketPermission;
@@ -189,6 +194,94 @@ impl ConfigRequestProcessor {
             image_generation: capabilities.image_generation,
             web_search: capabilities.web_search,
         })
+    }
+
+    pub(crate) async fn model_provider_list(
+        &self,
+        params: ModelProviderListParams,
+    ) -> Result<ModelProviderListResponse, JSONRPCErrorError> {
+        let ModelProviderListParams { cursor, limit } = params;
+        let config = self.load_latest_config(/*fallback_cwd*/ None).await?;
+        let mut providers = config
+            .model_providers
+            .iter()
+            .map(|(id, provider_info)| {
+                let mut env_http_headers = provider_info
+                    .env_http_headers
+                    .as_ref()
+                    .map(|headers| {
+                        headers
+                            .iter()
+                            .map(|(header, env_var)| ModelProviderEnvHttpHeader {
+                                header: header.clone(),
+                                env_var: env_var.clone(),
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                env_http_headers.sort_by(|left, right| left.header.cmp(&right.header));
+
+                let mut static_http_headers = provider_info
+                    .http_headers
+                    .as_ref()
+                    .map(|headers| headers.keys().cloned().collect::<Vec<_>>())
+                    .unwrap_or_default();
+                static_http_headers.sort();
+
+                let provider =
+                    create_model_provider(provider_info.clone(), /*auth_manager*/ None);
+                let capabilities = provider.capabilities();
+                ModelProviderSummary {
+                    id: id.clone(),
+                    name: provider_info.name.clone(),
+                    base_url: provider_info.base_url.clone(),
+                    wire_api: provider_info.wire_api.to_string(),
+                    is_active: id == &config.model_provider_id,
+                    requires_openai_auth: provider_info.requires_openai_auth,
+                    supports_websockets: provider_info.supports_websockets,
+                    env_key: provider_info.env_key.clone(),
+                    env_http_headers,
+                    static_http_headers,
+                    has_static_bearer_token: provider_info.experimental_bearer_token.is_some(),
+                    has_command_auth: provider_info.has_command_auth(),
+                    capabilities: ModelProviderCapabilities {
+                        namespace_tools: capabilities.namespace_tools,
+                        image_generation: capabilities.image_generation,
+                        web_search: capabilities.web_search,
+                    },
+                }
+            })
+            .collect::<Vec<_>>();
+        providers.sort_by(|left, right| left.id.cmp(&right.id));
+
+        let total = providers.len();
+        if total == 0 {
+            return Ok(ModelProviderListResponse {
+                data: Vec::new(),
+                next_cursor: None,
+            });
+        }
+
+        let effective_limit = limit.unwrap_or(total as u32).max(1) as usize;
+        let effective_limit = effective_limit.min(total);
+        let start = match cursor {
+            Some(cursor) => cursor
+                .parse::<usize>()
+                .map_err(|_| invalid_request(format!("invalid cursor: {cursor}")))?,
+            None => 0,
+        };
+
+        if start > total {
+            return Err(invalid_request(format!(
+                "cursor {start} exceeds total model providers {total}"
+            )));
+        }
+
+        let end = start.saturating_add(effective_limit).min(total);
+        let data = providers[start..end].to_vec();
+        let next_cursor = (end < total).then_some(end.to_string());
+
+        Ok(ModelProviderListResponse { data, next_cursor })
     }
 
     pub(crate) async fn handle_config_mutation(&self) {
