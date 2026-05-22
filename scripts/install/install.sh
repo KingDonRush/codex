@@ -3,23 +3,83 @@
 set -eu
 
 RELEASE="latest"
+INSTALL_VARIANT="${CODEX_INSTALL_VARIANT:-${CODEX_INSTALL_PRODUCT:-}}"
 
-BIN_DIR="${CODEX_INSTALL_DIR:-$HOME/.local/bin}"
-BIN_PATH="$BIN_DIR/codex"
-CODEX_HOME_DIR="${CODEX_HOME:-$HOME/.codex}"
-STANDALONE_ROOT="$CODEX_HOME_DIR/packages/standalone"
-RELEASES_DIR="$STANDALONE_ROOT/releases"
-CURRENT_LINK="$STANDALONE_ROOT/current"
-LOCK_FILE="$STANDALONE_ROOT/install.lock"
-LOCK_DIR="$STANDALONE_ROOT/install.lock.d"
 LOCK_STALE_AFTER_SECS=600
 
+product_name=""
+command_name=""
+package_asset_prefix=""
+npm_package_name=""
+legacy_platform_npm_prefix=""
+bin_dir=""
+bin_path=""
+product_home_dir=""
+standalone_root=""
+releases_dir=""
+current_link=""
+lock_file=""
+lock_dir=""
 path_action="already"
 path_profile=""
 conflict_manager=""
 conflict_path=""
 lock_kind=""
 tmp_dir=""
+
+case "${0##*/}" in
+  install-claudex.sh | claudex-install.sh)
+    if [ -z "$INSTALL_VARIANT" ]; then
+      INSTALL_VARIANT="claudex"
+    fi
+    ;;
+esac
+
+configure_product() {
+  if [ -z "$INSTALL_VARIANT" ]; then
+    INSTALL_VARIANT="codex"
+  fi
+
+  case "$INSTALL_VARIANT" in
+    codex)
+      product_name="Codex"
+      command_name="codex"
+      package_asset_prefix="codex"
+      npm_package_name="@openai/codex"
+      legacy_platform_npm_prefix="codex"
+      bin_dir="${CODEX_INSTALL_DIR:-$HOME/.local/bin}"
+      product_home_dir="${CODEX_HOME:-$HOME/.codex}"
+      ;;
+    claudex)
+      product_name="Claudex"
+      command_name="claudex"
+      package_asset_prefix="claudex"
+      npm_package_name="claudex"
+      legacy_platform_npm_prefix=""
+      bin_dir="${CLAUDEX_INSTALL_DIR:-${CODEX_INSTALL_DIR:-$HOME/.local/bin}}"
+      product_home_dir="${CLAUDEX_HOME:-$HOME/.claudex}"
+      ;;
+    *)
+      echo "Unsupported install variant: $INSTALL_VARIANT" >&2
+      exit 1
+      ;;
+  esac
+
+  bin_path="$bin_dir/$command_name"
+  standalone_root="$product_home_dir/packages/standalone"
+  releases_dir="$standalone_root/releases"
+  current_link="$standalone_root/current"
+  lock_file="$standalone_root/install.lock"
+  lock_dir="$standalone_root/install.lock.d"
+
+  BIN_DIR="$bin_dir"
+  BIN_PATH="$bin_path"
+  STANDALONE_ROOT="$standalone_root"
+  RELEASES_DIR="$releases_dir"
+  CURRENT_LINK="$current_link"
+  LOCK_FILE="$lock_file"
+  LOCK_DIR="$lock_dir"
+}
 
 step() {
   printf '==> %s\n' "$1"
@@ -57,9 +117,17 @@ parse_args() {
         RELEASE="$2"
         shift
         ;;
+      --variant | --product)
+        if [ "$#" -lt 2 ]; then
+          echo "$1 requires a value." >&2
+          exit 1
+        fi
+        INSTALL_VARIANT="$2"
+        shift
+        ;;
       --help | -h)
         cat <<EOF
-Usage: install.sh [--release VERSION]
+Usage: install.sh [--release VERSION] [--variant codex|claudex]
 EOF
         exit 0
         ;;
@@ -86,7 +154,7 @@ download_file() {
     return
   fi
 
-  echo "curl or wget is required to install Codex." >&2
+  echo "curl or wget is required to install $product_name." >&2
   exit 1
 }
 
@@ -103,7 +171,7 @@ download_text() {
     return
   fi
 
-  echo "curl or wget is required to install Codex." >&2
+  echo "curl or wget is required to install $product_name." >&2
   exit 1
 }
 
@@ -208,7 +276,7 @@ package_archive_digest() {
   ' "$manifest_path" 2>/dev/null || true)"
 
   if [ -z "$digest" ]; then
-    echo "Could not find SHA-256 digest for $asset in codex-package_SHA256SUMS." >&2
+    echo "Could not find SHA-256 digest for $asset in $(basename "$manifest_path")." >&2
     exit 1
   fi
 
@@ -233,7 +301,7 @@ file_sha256() {
     return
   fi
 
-  echo "sha256sum, shasum, or openssl is required to verify the Codex download." >&2
+  echo "sha256sum, shasum, or openssl is required to verify the $product_name download." >&2
   exit 1
 }
 
@@ -243,7 +311,7 @@ verify_archive_digest() {
   actual_digest="$(file_sha256 "$archive_path")"
 
   if [ "$actual_digest" != "$expected_digest" ]; then
-    echo "Downloaded Codex archive checksum did not match expected digest." >&2
+    echo "Downloaded $product_name archive checksum did not match expected digest." >&2
     echo "expected: $expected_digest" >&2
     echo "actual:   $actual_digest" >&2
     exit 1
@@ -252,7 +320,7 @@ verify_archive_digest() {
 
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
-    echo "$1 is required to install Codex." >&2
+    echo "$1 is required to install $product_name." >&2
     exit 1
   fi
 }
@@ -269,7 +337,7 @@ resolve_version() {
   resolved="$(printf '%s\n' "$release_json" | sed -n 's/.*"tag_name":[[:space:]]*"rust-v\([^"]*\)".*/\1/p' | head -n 1)"
 
   if [ -z "$resolved" ]; then
-    echo "Failed to resolve the latest Codex release version." >&2
+    echo "Failed to resolve the latest $product_name release version." >&2
     exit 1
   fi
 
@@ -310,8 +378,8 @@ add_to_path() {
 
   profile="$(pick_profile)"
   path_profile="$profile"
-  begin_marker="# >>> Codex installer >>>"
-  end_marker="# <<< Codex installer <<<"
+  begin_marker="# >>> $product_name installer >>>"
+  end_marker="# <<< $product_name installer <<<"
   path_line="export PATH=\"$BIN_DIR:\$PATH\""
 
   if [ -f "$profile" ] && grep -F "$begin_marker" "$profile" >/dev/null 2>&1; then
@@ -456,7 +524,7 @@ cleanup_stale_install_artifacts() {
   find "$STANDALONE_ROOT" -mindepth 1 -maxdepth 1 -name '.current.*' -exec rm -f {} +
 
   if [ -d "$BIN_DIR" ]; then
-    find "$BIN_DIR" -mindepth 1 -maxdepth 1 -name '.codex.*' -exec rm -f {} +
+    find "$BIN_DIR" -mindepth 1 -maxdepth 1 -name ".$command_name.*" -exec rm -f {} +
   fi
 }
 
@@ -491,13 +559,13 @@ version_from_binary() {
 }
 
 current_installed_version() {
-  version="$(version_from_binary "$CURRENT_LINK/bin/codex" || true)"
+  version="$(version_from_binary "$CURRENT_LINK/bin/$command_name" || true)"
   if [ -n "$version" ]; then
     printf '%s\n' "$version"
     return 0
   fi
 
-  version="$(version_from_binary "$CURRENT_LINK/codex" || true)"
+  version="$(version_from_binary "$CURRENT_LINK/$command_name" || true)"
   if [ -n "$version" ]; then
     printf '%s\n' "$version"
     return 0
@@ -507,7 +575,7 @@ current_installed_version() {
 }
 
 resolve_existing_codex() {
-  command -v codex 2>/dev/null || true
+  command -v "$command_name" 2>/dev/null || true
 }
 
 classify_existing_codex() {
@@ -571,30 +639,30 @@ prompt_yes_no() {
 print_launch_instructions() {
   case "$path_action" in
     added)
-      step "Current terminal: export PATH=\"$BIN_DIR:\$PATH\" && codex"
-      step "Future terminals: open a new terminal and run: codex"
+      step "Current terminal: export PATH=\"$BIN_DIR:\$PATH\" && $command_name"
+      step "Future terminals: open a new terminal and run: $command_name"
       step "PATH was added to $path_profile"
       ;;
     updated)
-      step "Current terminal: export PATH=\"$BIN_DIR:\$PATH\" && codex"
-      step "Future terminals: open a new terminal and run: codex"
+      step "Current terminal: export PATH=\"$BIN_DIR:\$PATH\" && $command_name"
+      step "Future terminals: open a new terminal and run: $command_name"
       step "PATH was updated in $path_profile"
       ;;
     configured)
-      step "Current terminal: export PATH=\"$BIN_DIR:\$PATH\" && codex"
-      step "Future terminals: open a new terminal and run: codex"
+      step "Current terminal: export PATH=\"$BIN_DIR:\$PATH\" && $command_name"
+      step "Future terminals: open a new terminal and run: $command_name"
       step "PATH is already configured in $path_profile"
       ;;
     *)
-      step "Current terminal: codex"
-      step "Future terminals: open a new terminal and run: codex"
+      step "Current terminal: $command_name"
+      step "Future terminals: open a new terminal and run: $command_name"
       ;;
   esac
 }
 
 maybe_launch_codex_now() {
-  if prompt_yes_no "Start Codex now?"; then
-    step "Launching Codex"
+  if prompt_yes_no "Start $product_name now?"; then
+    step "Launching $product_name"
     "$BIN_PATH"
   fi
 }
@@ -609,8 +677,8 @@ detect_conflicting_install() {
 
   conflict_manager="$manager"
   conflict_path="$existing_path"
-  step "Detected existing $manager-managed Codex at $existing_path"
-  warn "Multiple managed Codex installs can be ambiguous because PATH order decides which one runs."
+  step "Detected existing $manager-managed $product_name at $existing_path"
+  warn "Multiple managed $product_name installs can be ambiguous because PATH order decides which one runs."
 }
 
 handle_conflicting_install() {
@@ -620,23 +688,23 @@ handle_conflicting_install() {
 
   case "$conflict_manager" in
     brew)
-      uninstall_cmd="brew uninstall --cask codex"
+      uninstall_cmd="brew uninstall --cask $command_name"
       ;;
     bun)
-      uninstall_cmd="bun remove -g @openai/codex"
+      uninstall_cmd="bun remove -g $npm_package_name"
       ;;
     *)
-      uninstall_cmd="npm uninstall -g @openai/codex"
+      uninstall_cmd="npm uninstall -g $npm_package_name"
       ;;
   esac
 
-  if prompt_yes_no "Uninstall the existing $conflict_manager-managed Codex now?"; then
+  if prompt_yes_no "Uninstall the existing $conflict_manager-managed $product_name now?"; then
     step "Running: $uninstall_cmd"
     if ! sh -c "$uninstall_cmd"; then
-      warn "Failed to uninstall the existing $conflict_manager-managed Codex. Continuing with the standalone install."
+      warn "Failed to uninstall the existing $conflict_manager-managed $product_name. Continuing with the standalone install."
     fi
   else
-    warn "Leaving the existing $conflict_manager-managed Codex installed. PATH order will determine which codex runs."
+    warn "Leaving the existing $conflict_manager-managed $product_name installed. PATH order will determine which $command_name runs."
   fi
 }
 
@@ -649,11 +717,14 @@ install_package_release() {
   rm -rf "$stage_release"
   mkdir -p "$stage_release"
   tar -xzf "$archive_path" -C "$stage_release"
-  chmod 0755 "$stage_release/bin/codex" "$stage_release/codex-path/rg"
+  chmod 0755 "$stage_release/bin/$command_name" "$stage_release/codex-path/rg"
+  if [ "$command_name" = "claudex" ] && [ -f "$stage_release/bin/codex" ]; then
+    chmod 0755 "$stage_release/bin/codex"
+  fi
   if [ -f "$stage_release/codex-resources/bwrap" ]; then
     chmod 0755 "$stage_release/codex-resources/bwrap"
   fi
-  ln -sf "bin/codex" "$stage_release/codex"
+  ln -sf "bin/$command_name" "$stage_release/$command_name"
 
   if [ -e "$release_dir" ] || [ -L "$release_dir" ]; then
     rm -rf "$release_dir"
@@ -701,10 +772,13 @@ release_dir_is_complete() {
   case "$layout" in
     package)
       [ -f "$release_dir/codex-package.json" ] &&
-        [ -x "$release_dir/bin/codex" ] &&
-        [ -x "$release_dir/codex" ] &&
+        [ -x "$release_dir/bin/$command_name" ] &&
+        [ -x "$release_dir/$command_name" ] &&
         [ -x "$release_dir/codex-path/rg" ] ||
         return 1
+      if [ "$command_name" = "claudex" ] && [ ! -x "$release_dir/bin/codex" ]; then
+        return 1
+      fi
       ;;
     legacy-platform-npm)
       [ -x "$release_dir/codex" ] &&
@@ -732,17 +806,17 @@ update_current_link() {
 release_codex_relative_path() {
   release_dir="$1"
 
-  if [ -x "$release_dir/bin/codex" ]; then
-    printf 'bin/codex\n'
+  if [ -x "$release_dir/bin/$command_name" ]; then
+    printf 'bin/%s\n' "$command_name"
   else
-    printf 'codex\n'
+    printf '%s\n' "$command_name"
   fi
 }
 
 update_visible_command() {
   release_dir="$1"
   mkdir -p "$BIN_DIR"
-  tmp_link="$BIN_DIR/.codex.$$"
+  tmp_link="$BIN_DIR/.$command_name.$$"
   codex_relative_path="$(release_codex_relative_path "$release_dir")"
 
   replace_path_with_symlink "$BIN_PATH" "$CURRENT_LINK/$codex_relative_path" "$tmp_link"
@@ -753,6 +827,7 @@ verify_visible_command() {
 }
 
 parse_args "$@"
+configure_product
 
 require_command mktemp
 require_command tar
@@ -812,17 +887,18 @@ else
 fi
 
 resolved_version="$(resolve_version)"
-package_asset="codex-package-$vendor_target.tar.gz"
+package_asset="$package_asset_prefix-package-$vendor_target.tar.gz"
 checksum_asset="codex-package_SHA256SUMS"
 if release_asset_exists "$package_asset" "$resolved_version" &&
   release_asset_exists "$checksum_asset" "$resolved_version"; then
   install_layout="package"
   asset="$package_asset"
-elif release_asset_exists "codex-npm-$npm_tag-$resolved_version.tgz" "$resolved_version"; then
+elif [ -n "$legacy_platform_npm_prefix" ] &&
+  release_asset_exists "$legacy_platform_npm_prefix-npm-$npm_tag-$resolved_version.tgz" "$resolved_version"; then
   install_layout="legacy-platform-npm"
-  asset="codex-npm-$npm_tag-$resolved_version.tgz"
+  asset="$legacy_platform_npm_prefix-npm-$npm_tag-$resolved_version.tgz"
 else
-  echo "Could not find Codex package or platform npm release assets for Codex $resolved_version." >&2
+  echo "Could not find $product_name package release assets for $product_name $resolved_version." >&2
   exit 1
 fi
 download_url="$(release_url_for_asset "$asset" "$resolved_version")"
@@ -832,11 +908,11 @@ release_dir="$RELEASES_DIR/$release_name"
 current_version="$(current_installed_version)"
 
 if [ -n "$current_version" ] && [ "$current_version" != "$resolved_version" ]; then
-  step "Updating Codex CLI from $current_version to $resolved_version"
+  step "Updating $product_name CLI from $current_version to $resolved_version"
 elif [ -n "$current_version" ]; then
-  step "Updating Codex CLI"
+  step "Updating $product_name CLI"
 else
-  step "Installing Codex CLI"
+  step "Installing $product_name CLI"
 fi
 step "Detected platform: $platform_label"
 step "Resolved version: $resolved_version"
@@ -863,7 +939,7 @@ if ! release_dir_is_complete "$release_dir" "$resolved_version" "$vendor_target"
   archive_path="$tmp_dir/$asset"
   checksum_path="$tmp_dir/$checksum_asset"
 
-  step "Downloading Codex CLI"
+  step "Downloading $product_name CLI"
   if [ "$install_layout" = "package" ]; then
     checksum_digest="$(release_asset_digest "$checksum_asset" "$resolved_version")"
     download_file "$checksum_url" "$checksum_path"
@@ -905,5 +981,5 @@ case "$path_action" in
     ;;
 esac
 
-printf 'Codex CLI %s installed successfully.\n' "$resolved_version"
+printf '%s CLI %s installed successfully.\n' "$product_name" "$resolved_version"
 maybe_launch_codex_now

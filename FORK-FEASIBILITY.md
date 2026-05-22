@@ -1066,10 +1066,17 @@ Contratos:
 - o pacote npm `claudex` expoe somente o bin `claudex`;
 - o pacote `@openai/codex` nao expoe `claudex`;
 - o package builder tambem aceita `--variant claudex` para criar pacote nativo
-  com `bin/claudex`.
+  com `bin/claudex` e o companion interno `bin/codex`, porque o entrypoint
+  Claudex usa o binario Codex como implementacao isolada;
 - `claudex app` nao delega para `codex app`: quando houver shell Desktop
   Claudex, ele deve abrir/procurar `Claudex`/`Claudex.app`; em plataformas ou
   builds sem esse artefato, falha explicitamente em vez de abrir Codex Desktop.
+- o pipeline de release gera `claudex-package-*`, inclui esses arquivos no
+  manifesto `codex-package_SHA256SUMS`, publica o pacote npm `claudex` e copia
+  aliases `install-claudex.sh`/`install-claudex.ps1`;
+- os instaladores standalone aceitam `--variant claudex` e, nessa variante,
+  usam `CLAUDEX_HOME`/`~/.claudex`, `CLAUDEX_INSTALL_DIR` quando definido e o
+  comando visivel `claudex`.
 
 ## Checks obrigatorios por tipo de mudanca
 

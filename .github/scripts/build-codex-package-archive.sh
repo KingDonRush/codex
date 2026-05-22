@@ -5,7 +5,7 @@ usage() {
   cat <<'EOF'
 Usage: build-codex-package-archive.sh \
   --target <rust-target> \
-  --bundle <primary|app-server> \
+  --bundle <primary|app-server|claudex> \
   --entrypoint-dir <dir> \
   --archive-dir <dir> \
   [--bwrap-bin <path>] \
@@ -96,8 +96,13 @@ case "$bundle" in
     entrypoint="codex-app-server"
     archive_stem="codex-app-server-package"
     ;;
+  claudex)
+    variant="claudex"
+    entrypoint="claudex"
+    archive_stem="claudex-package"
+    ;;
   *)
-    echo "No Codex package variant for bundle: $bundle" >&2
+    echo "No package variant for bundle: $bundle" >&2
     exit 1
     ;;
 esac

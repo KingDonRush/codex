@@ -48,6 +48,16 @@ def build_package_dir(
         bin_dir / entrypoint_name,
         is_windows=spec.is_windows,
     )
+    for companion_bin, companion_name in zip(
+        inputs.companion_bins,
+        variant.companion_entrypoint_names(spec),
+        strict=True,
+    ):
+        copy_executable(
+            companion_bin,
+            bin_dir / companion_name,
+            is_windows=spec.is_windows,
+        )
     copy_executable(inputs.rg_bin, path_dir / spec.rg_name, is_windows=spec.is_windows)
 
     if inputs.bwrap_bin is not None:
@@ -118,6 +128,10 @@ def validate_package_dir(
 
     required_files = [
         Path("bin") / variant.entrypoint_name(spec),
+        *[
+            Path("bin") / companion_name
+            for companion_name in variant.companion_entrypoint_names(spec)
+        ],
         Path("codex-path") / spec.rg_name,
     ]
     executable_files = list(required_files)

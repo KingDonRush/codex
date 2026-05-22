@@ -1,10 +1,43 @@
 param(
-    [string]$Release = "latest"
+    [string]$Release = "latest",
+    [string]$Variant = ""
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
+
+if ([string]::IsNullOrWhiteSpace($Variant)) {
+    if (-not [string]::IsNullOrWhiteSpace($env:CODEX_INSTALL_VARIANT)) {
+        $Variant = $env:CODEX_INSTALL_VARIANT
+    } elseif (-not [string]::IsNullOrWhiteSpace($env:CODEX_INSTALL_PRODUCT)) {
+        $Variant = $env:CODEX_INSTALL_PRODUCT
+    } elseif ($MyInvocation.MyCommand.Name -in @("install-claudex.ps1", "claudex-install.ps1")) {
+        $Variant = "claudex"
+    } else {
+        $Variant = "codex"
+    }
+}
+
+switch ($Variant.ToLowerInvariant()) {
+    "codex" {
+        $ProductName = "Codex"
+        $CommandName = "codex"
+        $PackageAssetPrefix = "codex"
+        $NpmPackageName = "@openai/codex"
+        $LegacyPlatformNpmPrefix = "codex"
+    }
+    "claudex" {
+        $ProductName = "Claudex"
+        $CommandName = "claudex"
+        $PackageAssetPrefix = "claudex"
+        $NpmPackageName = "claudex"
+        $LegacyPlatformNpmPrefix = ""
+    }
+    default {
+        throw "Unsupported install variant: $Variant"
+    }
+}
 
 function Write-Step {
     param(
@@ -86,7 +119,7 @@ function Get-ReleaseAssetMetadata {
 
     $metadata = Find-ReleaseAssetMetadata -AssetName $AssetName -ResolvedVersion $ResolvedVersion
     if ($null -eq $metadata) {
-        throw "Could not find release asset $AssetName for Codex $ResolvedVersion."
+        throw "Could not find release asset $AssetName for $ProductName $ResolvedVersion."
     }
 
     return $metadata
@@ -100,7 +133,7 @@ function Test-ArchiveDigest {
 
     $actualDigest = (Get-FileHash -LiteralPath $ArchivePath -Algorithm SHA256).Hash.ToLowerInvariant()
     if ($actualDigest -ne $ExpectedDigest) {
-        throw "Downloaded Codex archive checksum did not match expected digest. Expected $ExpectedDigest but got $actualDigest."
+        throw "Downloaded $ProductName archive checksum did not match expected digest. Expected $ExpectedDigest but got $actualDigest."
     }
 }
 
@@ -118,7 +151,8 @@ function Get-PackageArchiveDigest {
         }
     }
 
-    throw "Could not find SHA-256 digest for $AssetName in codex-package_SHA256SUMS."
+    $manifestName = Split-Path -Leaf $ManifestPath
+    throw "Could not find SHA-256 digest for $AssetName in $manifestName."
 }
 
 function Path-Contains {
@@ -187,7 +221,7 @@ function Resolve-Version {
 
     $release = Invoke-RestMethod -Uri "https://api.github.com/repos/openai/codex/releases/latest"
     if (-not $release.tag_name) {
-        Write-Error "Failed to resolve the latest Codex release version."
+        Write-Error "Failed to resolve the latest $ProductName release version."
         exit 1
     }
 
@@ -221,12 +255,12 @@ function Get-CurrentInstalledVersion {
         [string]$StandaloneCurrentDir
     )
 
-    $standaloneVersion = Get-VersionFromBinary -CodexPath (Join-Path $StandaloneCurrentDir "bin\codex.exe")
+    $standaloneVersion = Get-VersionFromBinary -CodexPath (Join-Path $StandaloneCurrentDir "bin\$CommandName.exe")
     if (-not [string]::IsNullOrWhiteSpace($standaloneVersion)) {
         return $standaloneVersion
     }
 
-    $standaloneVersion = Get-VersionFromBinary -CodexPath (Join-Path $StandaloneCurrentDir "codex.exe")
+    $standaloneVersion = Get-VersionFromBinary -CodexPath (Join-Path $StandaloneCurrentDir "$CommandName.exe")
     if (-not [string]::IsNullOrWhiteSpace($standaloneVersion)) {
         return $standaloneVersion
     }
@@ -496,11 +530,14 @@ function Test-PackageContentsAreComplete {
 
     $expectedFiles = @(
         "codex-package.json",
-        "bin\codex.exe",
+        "bin\$CommandName.exe",
         "codex-path\rg.exe",
         "codex-resources\codex-command-runner.exe",
         "codex-resources\codex-windows-sandbox-setup.exe"
     )
+    if ($CommandName -eq "claudex") {
+        $expectedFiles += "bin\codex.exe"
+    }
     foreach ($name in $expectedFiles) {
         if (-not (Test-Path -LiteralPath (Join-Path $PackageDir $name) -PathType Leaf)) {
             return $false
@@ -554,7 +591,7 @@ function Test-ReleaseIsComplete {
             }
         }
         default {
-            throw "Unknown Codex installer layout: $Layout"
+            throw "Unknown $ProductName installer layout: $Layout"
         }
     }
 
@@ -562,7 +599,7 @@ function Test-ReleaseIsComplete {
 }
 
 function Get-ExistingCodexCommand {
-    $existing = Get-Command codex -ErrorAction SilentlyContinue
+    $existing = Get-Command $CommandName -ErrorAction SilentlyContinue
     if ($null -eq $existing) {
         return $null
     }
@@ -606,8 +643,8 @@ function Get-ConflictingInstall {
         return $null
     }
 
-    Write-Step "Detected existing $manager-managed Codex at $existingPath"
-    Write-WarningStep "Multiple managed Codex installs can be ambiguous because PATH order decides which one runs."
+    Write-Step "Detected existing $manager-managed $ProductName at $existingPath"
+    Write-WarningStep "Multiple managed $ProductName installs can be ambiguous because PATH order decides which one runs."
 
     return [PSCustomObject]@{
         Manager = $manager
@@ -627,21 +664,21 @@ function Maybe-HandleConflictingInstall {
     $manager = $Conflict.Manager
 
     $uninstallArgs = if ($manager -eq "bun") {
-        @("remove", "-g", "@openai/codex")
+        @("remove", "-g", $NpmPackageName)
     } else {
-        @("uninstall", "-g", "@openai/codex")
+        @("uninstall", "-g", $NpmPackageName)
     }
     $uninstallCommand = if ($manager -eq "bun") { "bun" } else { "npm" }
 
-    if (Prompt-YesNo "Uninstall the existing $manager-managed Codex now?") {
+    if (Prompt-YesNo "Uninstall the existing $manager-managed $ProductName now?") {
         Write-Step "Running: $uninstallCommand $($uninstallArgs -join ' ')"
         try {
             & $uninstallCommand @uninstallArgs
         } catch {
-            Write-WarningStep "Failed to uninstall the existing $manager-managed Codex. Continuing with the standalone install."
+            Write-WarningStep "Failed to uninstall the existing $manager-managed $ProductName. Continuing with the standalone install."
         }
     } else {
-        Write-WarningStep "Leaving the existing $manager-managed Codex installed. PATH order will determine which codex runs."
+        Write-WarningStep "Leaving the existing $manager-managed $ProductName installed. PATH order will determine which $CommandName runs."
     }
 }
 
@@ -650,10 +687,10 @@ function Test-VisibleCodexCommand {
         [string]$VisibleBinDir
     )
 
-    $codexCommand = Join-Path $VisibleBinDir "codex.exe"
+    $codexCommand = Join-Path $VisibleBinDir "$CommandName.exe"
     & $codexCommand --version *> $null
     if ($LASTEXITCODE -ne 0) {
-        throw "Installed Codex command failed verification: $codexCommand --version"
+        throw "Installed $ProductName command failed verification: $codexCommand --version"
     }
 }
 
@@ -663,7 +700,7 @@ if ($env:OS -ne "Windows_NT") {
 }
 
 if (-not [Environment]::Is64BitOperatingSystem) {
-    Write-Error "Codex requires a 64-bit version of Windows."
+    Write-Error "$ProductName requires a 64-bit version of Windows."
     exit 1
 }
 
@@ -688,21 +725,42 @@ switch ($architecture) {
     }
 }
 
-$codexHome = if ([string]::IsNullOrWhiteSpace($env:CODEX_HOME)) {
-    Join-Path $env:USERPROFILE ".codex"
+if ($Variant.ToLowerInvariant() -eq "claudex") {
+    $codexHome = if ([string]::IsNullOrWhiteSpace($env:CLAUDEX_HOME)) {
+        Join-Path $env:USERPROFILE ".claudex"
+    } else {
+        $env:CLAUDEX_HOME
+    }
 } else {
-    $env:CODEX_HOME
+    $codexHome = if ([string]::IsNullOrWhiteSpace($env:CODEX_HOME)) {
+        Join-Path $env:USERPROFILE ".codex"
+    } else {
+        $env:CODEX_HOME
+    }
 }
 $standaloneRoot = Join-Path $codexHome "packages\standalone"
 $releasesDir = Join-Path $standaloneRoot "releases"
 $currentDir = Join-Path $standaloneRoot "current"
 $lockPath = Join-Path $standaloneRoot "install.lock"
 
-$defaultVisibleBinDir = Join-Path $env:LOCALAPPDATA "Programs\OpenAI\Codex\bin"
-if ([string]::IsNullOrWhiteSpace($env:CODEX_INSTALL_DIR)) {
-    $visibleBinDir = $defaultVisibleBinDir
+if ($Variant.ToLowerInvariant() -eq "claudex") {
+    $defaultVisibleBinDir = Join-Path $env:LOCALAPPDATA "Programs\Claudex\bin"
+    if ([string]::IsNullOrWhiteSpace($env:CLAUDEX_INSTALL_DIR)) {
+        if ([string]::IsNullOrWhiteSpace($env:CODEX_INSTALL_DIR)) {
+            $visibleBinDir = $defaultVisibleBinDir
+        } else {
+            $visibleBinDir = $env:CODEX_INSTALL_DIR
+        }
+    } else {
+        $visibleBinDir = $env:CLAUDEX_INSTALL_DIR
+    }
 } else {
-    $visibleBinDir = $env:CODEX_INSTALL_DIR
+    $defaultVisibleBinDir = Join-Path $env:LOCALAPPDATA "Programs\OpenAI\Codex\bin"
+    if ([string]::IsNullOrWhiteSpace($env:CODEX_INSTALL_DIR)) {
+        $visibleBinDir = $defaultVisibleBinDir
+    } else {
+        $visibleBinDir = $env:CODEX_INSTALL_DIR
+    }
 }
 
 $currentVersion = Get-CurrentInstalledVersion -StandaloneCurrentDir $currentDir
@@ -711,11 +769,11 @@ $releaseName = "$resolvedVersion-$target"
 $releaseDir = Join-Path $releasesDir $releaseName
 
 if (-not [string]::IsNullOrWhiteSpace($currentVersion) -and $currentVersion -ne $resolvedVersion) {
-    Write-Step "Updating Codex CLI from $currentVersion to $resolvedVersion"
+    Write-Step "Updating $ProductName CLI from $currentVersion to $resolvedVersion"
 } elseif (-not [string]::IsNullOrWhiteSpace($currentVersion)) {
-    Write-Step "Updating Codex CLI"
+    Write-Step "Updating $ProductName CLI"
 } else {
-    Write-Step "Installing Codex CLI"
+    Write-Step "Installing $ProductName CLI"
 }
 Write-Step "Detected platform: $platformLabel"
 Write-Step "Resolved version: $resolvedVersion"
@@ -723,18 +781,22 @@ Write-Step "Resolved version: $resolvedVersion"
 $conflictingInstall = Get-ConflictingInstall -VisibleBinDir $visibleBinDir
 $oldStandaloneBackup = $null
 
-$packageAsset = "codex-package-$target.tar.gz"
+$packageAsset = "$PackageAssetPrefix-package-$target.tar.gz"
 $checksumAsset = "codex-package_SHA256SUMS"
 $packageMetadata = Find-ReleaseAssetMetadata -AssetName $packageAsset -ResolvedVersion $resolvedVersion
 $checksumMetadata = Find-ReleaseAssetMetadata -AssetName $checksumAsset -ResolvedVersion $resolvedVersion
 $installLayout = "Package"
 if ($null -eq $packageMetadata -or $null -eq $checksumMetadata) {
-    $packageAsset = "codex-npm-$npmTag-$resolvedVersion.tgz"
-    $packageMetadata = Find-ReleaseAssetMetadata -AssetName $packageAsset -ResolvedVersion $resolvedVersion
+    if (-not [string]::IsNullOrWhiteSpace($LegacyPlatformNpmPrefix)) {
+        $packageAsset = "$LegacyPlatformNpmPrefix-npm-$npmTag-$resolvedVersion.tgz"
+        $packageMetadata = Find-ReleaseAssetMetadata -AssetName $packageAsset -ResolvedVersion $resolvedVersion
+    } else {
+        $packageMetadata = $null
+    }
     if ($null -ne $packageMetadata) {
         $installLayout = "LegacyPlatformNpm"
     } else {
-        throw "Could not find Codex package or platform npm release assets for Codex $resolvedVersion."
+        throw "Could not find $ProductName package release assets for $ProductName $resolvedVersion."
     }
     $checksumMetadata = $null
 }
@@ -754,7 +816,7 @@ try {
             $checksumPath = Join-Path $tempDir $checksumAsset
             $stagingDir = Join-Path $releasesDir ".staging.$releaseName.$PID"
 
-            Write-Step "Downloading Codex CLI"
+            Write-Step "Downloading $ProductName CLI"
             if ($installLayout -eq "Package") {
                 Invoke-WebRequest -Uri $checksumMetadata.Url -OutFile $checksumPath
                 Test-ArchiveDigest -ArchivePath $checksumPath -ExpectedDigest $checksumMetadata.Sha256
@@ -773,7 +835,7 @@ try {
             if ($installLayout -eq "Package") {
                 tar -xzf $archivePath -C $stagingDir
                 if (-not (Test-PackageContentsAreComplete -PackageDir $stagingDir)) {
-                    throw "Downloaded Codex package archive did not contain the expected package layout."
+                    throw "Downloaded $ProductName package archive did not contain the expected package layout."
                 }
             } else {
                 $extractDir = Join-Path $tempDir "extract"
@@ -815,7 +877,9 @@ try {
             $currentDir
         }
         New-Item -ItemType Directory -Force -Path $visibleParent | Out-Null
-        $oldStandaloneBackup = Move-OldStandaloneBinIfApproved -VisibleBinDir $visibleBinDir -DefaultVisibleBinDir $defaultVisibleBinDir
+        if ($Variant.ToLowerInvariant() -eq "codex") {
+            $oldStandaloneBackup = Move-OldStandaloneBinIfApproved -VisibleBinDir $visibleBinDir -DefaultVisibleBinDir $defaultVisibleBinDir
+        }
         try {
             Ensure-Junction -LinkPath $visibleBinDir -TargetPath $currentBinDir -InstallerOwnedTargetPrefix $standaloneRoot
             Test-VisibleCodexCommand -VisibleBinDir $visibleBinDir
@@ -862,12 +926,12 @@ if (-not (Path-Contains -PathValue $env:Path -Entry $visibleBinDir)) {
     }
 }
 
-Write-Step "Current PowerShell session: codex"
-Write-Step "Future PowerShell windows: open a new PowerShell window and run: codex"
-Write-Host "Codex CLI $resolvedVersion installed successfully."
+Write-Step "Current PowerShell session: $CommandName"
+Write-Step "Future PowerShell windows: open a new PowerShell window and run: $CommandName"
+Write-Host "$ProductName CLI $resolvedVersion installed successfully."
 
-$codexCommand = Join-Path $visibleBinDir "codex.exe"
-if (Prompt-YesNo "Start Codex now?") {
-    Write-Step "Launching Codex"
+$codexCommand = Join-Path $visibleBinDir "$CommandName.exe"
+if (Prompt-YesNo "Start $ProductName now?") {
+    Write-Step "Launching $ProductName"
     & $codexCommand
 }

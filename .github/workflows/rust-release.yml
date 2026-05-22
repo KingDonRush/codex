@@ -168,6 +168,12 @@ jobs:
             binaries: "codex-app-server"
             build_dmg: "false"
           - runner: macos-15-xlarge
+            target: aarch64-apple-darwin
+            bundle: claudex
+            artifact_name: aarch64-apple-darwin-claudex
+            binaries: "codex claudex"
+            build_dmg: "false"
+          - runner: macos-15-xlarge
             target: x86_64-apple-darwin
             bundle: primary
             artifact_name: x86_64-apple-darwin
@@ -178,6 +184,12 @@ jobs:
             bundle: app-server
             artifact_name: x86_64-apple-darwin-app-server
             binaries: "codex-app-server"
+            build_dmg: "false"
+          - runner: macos-15-xlarge
+            target: x86_64-apple-darwin
+            bundle: claudex
+            artifact_name: x86_64-apple-darwin-claudex
+            binaries: "codex claudex"
             build_dmg: "false"
           # Release artifacts intentionally ship MUSL-linked Linux binaries.
           - runner: codex-linux-x64-xl
@@ -192,6 +204,12 @@ jobs:
             artifact_name: x86_64-unknown-linux-musl-app-server
             binaries: "codex-app-server"
             build_dmg: "false"
+          - runner: codex-linux-x64-xl
+            target: x86_64-unknown-linux-musl
+            bundle: claudex
+            artifact_name: x86_64-unknown-linux-musl-claudex
+            binaries: "codex claudex"
+            build_dmg: "false"
           - runner: codex-linux-arm64
             target: aarch64-unknown-linux-musl
             bundle: primary
@@ -203,6 +221,12 @@ jobs:
             bundle: app-server
             artifact_name: aarch64-unknown-linux-musl-app-server
             binaries: "codex-app-server"
+            build_dmg: "false"
+          - runner: codex-linux-arm64
+            target: aarch64-unknown-linux-musl
+            bundle: claudex
+            artifact_name: aarch64-unknown-linux-musl-claudex
+            binaries: "codex claudex"
             build_dmg: "false"
 
     steps:
@@ -533,6 +557,14 @@ jobs:
             --entrypoint-dir "target/${TARGET}/release" \
             --archive-dir "dist/${TARGET}"
 
+      - name: Remove Claudex companion raw artifact
+        if: ${{ matrix.bundle == 'claudex' && (runner.os != 'macOS' || env.SIGN_MACOS == 'true') }}
+        shell: bash
+        run: |
+          rm -f \
+            "dist/${{ matrix.target }}/codex-${{ matrix.target }}" \
+            "dist/${{ matrix.target }}/codex-${{ matrix.target }}.sigstore"
+
       - name: Build Python runtime wheel
         if: ${{ matrix.bundle == 'primary' && (runner.os != 'macOS' || env.SIGN_MACOS == 'true') }}
         shell: bash
@@ -656,6 +688,11 @@ jobs:
             artifact_name: aarch64-apple-darwin-app-server
             binaries: "codex-app-server"
             build_dmg: "false"
+          - target: aarch64-apple-darwin
+            bundle: claudex
+            artifact_name: aarch64-apple-darwin-claudex
+            binaries: "codex claudex"
+            build_dmg: "false"
           - target: x86_64-apple-darwin
             bundle: primary
             artifact_name: x86_64-apple-darwin
@@ -665,6 +702,11 @@ jobs:
             bundle: app-server
             artifact_name: x86_64-apple-darwin-app-server
             binaries: "codex-app-server"
+            build_dmg: "false"
+          - target: x86_64-apple-darwin
+            bundle: claudex
+            artifact_name: x86_64-apple-darwin-claudex
+            binaries: "codex claudex"
             build_dmg: "false"
 
     steps:
@@ -805,6 +847,12 @@ jobs:
             --entrypoint-dir "dist/${TARGET}" \
             --archive-dir "dist/${TARGET}" \
             --target-suffixed-entrypoint
+
+      - name: Remove Claudex companion raw artifact
+        if: ${{ matrix.bundle == 'claudex' }}
+        shell: bash
+        run: |
+          rm -f "dist/${{ matrix.target }}/codex-${{ matrix.target }}"
 
       - name: Build Python runtime wheel
         if: ${{ matrix.bundle == 'primary' }}
@@ -1081,8 +1129,10 @@ jobs:
             ! -name '*-apple-darwin*-unsigned' \
             ! -name 'aarch64-unknown-linux-musl' \
             ! -name 'aarch64-unknown-linux-musl-app-server' \
+            ! -name 'aarch64-unknown-linux-musl-claudex' \
             ! -name 'x86_64-unknown-linux-musl' \
             ! -name 'x86_64-unknown-linux-musl-app-server' \
+            ! -name 'x86_64-unknown-linux-musl-claudex' \
             ! -name 'aarch64-pc-windows-msvc' \
             ! -name 'x86_64-pc-windows-msvc' \
             -exec rm -rf {} +
@@ -1110,7 +1160,7 @@ jobs:
           manifest="dist/codex-package_SHA256SUMS"
           tmp_manifest="$(mktemp)"
           find dist -type f \
-            \( -name 'codex-package-*.tar.gz' -o -name 'codex-app-server-package-*.tar.gz' \) \
+            \( -name 'codex-package-*.tar.gz' -o -name 'codex-app-server-package-*.tar.gz' -o -name 'claudex-package-*.tar.gz' \) \
             -print |
             sort |
             while IFS= read -r archive; do
@@ -1211,6 +1261,7 @@ jobs:
             --release-version "$RELEASE_VERSION" \
             --workflow-url "$workflow_url" \
             --package codex \
+            --package claudex \
             --package codex-responses-api-proxy \
             --package codex-sdk
 
@@ -1218,7 +1269,9 @@ jobs:
         if: ${{ env.SIGN_MACOS == 'true' }}
         run: |
           cp scripts/install/install.sh dist/install.sh
+          cp scripts/install/install.sh dist/install-claudex.sh
           cp scripts/install/install.ps1 dist/install.ps1
+          cp scripts/install/install.ps1 dist/install-claudex.ps1
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2.6.1

@@ -31,14 +31,22 @@ class PackageVariant:
     name: str
     cargo_bin: str
     executable_stem: str
+    companion_executable_stems: tuple[str, ...] = ()
 
     def entrypoint_name(self, spec: TargetSpec) -> str:
         return f"{self.executable_stem}{spec.exe_suffix}"
+
+    def companion_entrypoint_names(self, spec: TargetSpec) -> tuple[str, ...]:
+        return tuple(
+            f"{executable_stem}{spec.exe_suffix}"
+            for executable_stem in self.companion_executable_stems
+        )
 
 
 @dataclass(frozen=True)
 class PackageInputs:
     entrypoint_bin: Path
+    companion_bins: tuple[Path, ...]
     rg_bin: Path
     bwrap_bin: Path | None
     codex_command_runner_bin: Path | None
@@ -60,6 +68,7 @@ PACKAGE_VARIANTS: dict[str, PackageVariant] = {
         name="claudex",
         cargo_bin="claudex",
         executable_stem="claudex",
+        companion_executable_stems=("codex",),
     ),
 }
 
