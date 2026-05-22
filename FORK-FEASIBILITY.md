@@ -1067,6 +1067,9 @@ Contratos:
 - o pacote `@openai/codex` nao expoe `claudex`;
 - o package builder tambem aceita `--variant claudex` para criar pacote nativo
   com `bin/claudex`.
+- `claudex app` nao delega para `codex app`: quando houver shell Desktop
+  Claudex, ele deve abrir/procurar `Claudex`/`Claudex.app`; em plataformas ou
+  builds sem esse artefato, falha explicitamente em vez de abrir Codex Desktop.
 
 ## Checks obrigatorios por tipo de mudanca
 

@@ -1,4 +1,6 @@
 pub(crate) mod debug_sandbox;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub mod desktop_app;
 mod exit_status;
 pub(crate) mod login;
 
