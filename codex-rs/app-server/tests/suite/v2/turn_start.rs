@@ -57,6 +57,7 @@ use codex_core::personality_migration::PERSONALITY_MIGRATION_FILENAME;
 use codex_core::test_support::all_model_presets;
 use codex_features::FEATURES;
 use codex_features::Feature;
+use codex_model_provider_info::ANTHROPIC_DEFAULT_MODEL_ID;
 use codex_protocol::config_types::CollaborationMode;
 use codex_protocol::config_types::ModeKind;
 use codex_protocol::config_types::Personality;
@@ -296,6 +297,147 @@ async fn turn_start_with_empty_input_runs_model_request() -> Result<()> {
                     .is_some_and(Vec::is_empty)
         }),
         "empty turn/start should not synthesize an empty user message: {input:?}"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn turn_start_with_anthropic_provider_runs_messages_request() -> Result<()> {
+    let server = wiremock::MockServer::start().await;
+    wiremock::Mock::given(wiremock::matchers::method("POST"))
+        .and(wiremock::matchers::path("/v1/messages"))
+        .respond_with(
+            wiremock::ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(anthropic_text_sse("msg-app-server", "Anthropic done")),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let codex_home = TempDir::new()?;
+    create_anthropic_config_toml(codex_home.path(), &server.uri())?;
+
+    let mut mcp = McpProcess::new_with_env(
+        codex_home.path(),
+        &[("ANTHROPIC_API_KEY", Some("anthropic-test-key"))],
+    )
+    .await?;
+    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+
+    let thread_req = mcp
+        .send_thread_start_request(ThreadStartParams {
+            model: Some(ANTHROPIC_DEFAULT_MODEL_ID.to_string()),
+            thread_source: Some(ThreadSource::User),
+            ..Default::default()
+        })
+        .await?;
+    let thread_resp: JSONRPCResponse = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_response_message(RequestId::Integer(thread_req)),
+    )
+    .await??;
+    let ThreadStartResponse {
+        thread,
+        model_provider,
+        ..
+    } = to_response::<ThreadStartResponse>(thread_resp)?;
+    assert_eq!(model_provider, "anthropic_test");
+
+    let turn_req = mcp
+        .send_turn_start_request(TurnStartParams {
+            thread_id: thread.id.clone(),
+            input: vec![V2UserInput::Text {
+                text: "Hello Claude".to_string(),
+                text_elements: Vec::new(),
+            }],
+            ..Default::default()
+        })
+        .await?;
+    let turn_resp: JSONRPCResponse = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_response_message(RequestId::Integer(turn_req)),
+    )
+    .await??;
+    let TurnStartResponse { turn } = to_response::<TurnStartResponse>(turn_resp)?;
+    assert!(!turn.id.is_empty());
+
+    let completed_agent_message = timeout(DEFAULT_READ_TIMEOUT, async {
+        loop {
+            let completed_notif = mcp
+                .read_stream_until_notification_message("item/completed")
+                .await?;
+            let completed: ItemCompletedNotification = serde_json::from_value(
+                completed_notif
+                    .params
+                    .clone()
+                    .expect("item/completed params"),
+            )?;
+            if let ThreadItem::AgentMessage { .. } = completed.item {
+                return Ok::<ThreadItem, anyhow::Error>(completed.item);
+            }
+        }
+    })
+    .await??;
+    let ThreadItem::AgentMessage { text, .. } = completed_agent_message else {
+        unreachable!("loop ensures we break on agent message items");
+    };
+    assert_eq!(text, "Anthropic done");
+
+    let completed_notif: JSONRPCNotification = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_notification_message("turn/completed"),
+    )
+    .await??;
+    let completed: TurnCompletedNotification = serde_json::from_value(
+        completed_notif
+            .params
+            .expect("turn/completed params must be present"),
+    )?;
+    assert_eq!(completed.thread_id, thread.id);
+    assert_eq!(completed.turn.id, turn.id);
+    assert_eq!(completed.turn.status, TurnStatus::Completed);
+
+    let requests = server
+        .received_requests()
+        .await
+        .context("failed to fetch received requests")?;
+    let messages_requests = requests
+        .iter()
+        .filter(|request| request.url.path() == "/v1/messages")
+        .collect::<Vec<_>>();
+    assert_eq!(messages_requests.len(), 1);
+    let request = messages_requests[0];
+    assert_eq!(
+        request
+            .headers
+            .get("x-api-key")
+            .and_then(|value| value.to_str().ok()),
+        Some("anthropic-test-key")
+    );
+    assert!(request.headers.get("authorization").is_none());
+    assert_eq!(
+        request
+            .headers
+            .get("anthropic-version")
+            .and_then(|value| value.to_str().ok()),
+        Some("2023-06-01")
+    );
+    let body = request
+        .body_json::<Value>()
+        .context("request body should be JSON")?;
+    assert_eq!(
+        body.get("model").and_then(Value::as_str),
+        Some(ANTHROPIC_DEFAULT_MODEL_ID)
+    );
+    assert_eq!(body.get("stream").and_then(Value::as_bool), Some(true));
+    assert_eq!(body.get("input"), None);
+    assert!(
+        body.get("messages")
+            .and_then(Value::as_array)
+            .is_some_and(|messages| !messages.is_empty()),
+        "Anthropic request should send Messages API history: {body:?}"
     );
 
     Ok(())
@@ -3811,6 +3953,54 @@ async fn turn_start_with_elevated_override_does_not_persist_project_trust() -> R
     assert!(!config_toml.contains(&workspace.path().display().to_string()));
 
     Ok(())
+}
+
+fn anthropic_text_sse(message_id: &str, text: &str) -> String {
+    format!(
+        concat!(
+            "event: message_start\n",
+            "data: {{\"type\":\"message_start\",\"message\":{{\"id\":\"{message_id}\",\"usage\":{{\"input_tokens\":1,\"output_tokens\":0}}}}}}\n\n",
+            "event: content_block_start\n",
+            "data: {{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{{\"type\":\"text\",\"text\":\"\"}}}}\n\n",
+            "event: content_block_delta\n",
+            "data: {{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{{\"type\":\"text_delta\",\"text\":{text_json}}}}}\n\n",
+            "event: content_block_stop\n",
+            "data: {{\"type\":\"content_block_stop\",\"index\":0}}\n\n",
+            "event: message_delta\n",
+            "data: {{\"type\":\"message_delta\",\"usage\":{{\"output_tokens\":1}}}}\n\n",
+            "event: message_stop\n",
+            "data: {{\"type\":\"message_stop\"}}\n\n",
+        ),
+        message_id = message_id,
+        text_json = serde_json::json!(text),
+    )
+}
+
+fn create_anthropic_config_toml(codex_home: &Path, server_uri: &str) -> std::io::Result<()> {
+    let config_toml = codex_home.join("config.toml");
+    std::fs::write(
+        config_toml,
+        format!(
+            r#"
+model = "{ANTHROPIC_DEFAULT_MODEL_ID}"
+approval_policy = "never"
+sandbox_mode = "read-only"
+
+model_provider = "anthropic_test"
+
+[model_providers.anthropic_test]
+name = "Anthropic Test"
+base_url = "{server_uri}/v1"
+env_key = "ANTHROPIC_API_KEY"
+wire_api = "anthropic_messages"
+request_max_retries = 0
+stream_max_retries = 0
+
+[model_providers.anthropic_test.http_headers]
+anthropic-version = "2023-06-01"
+"#
+        ),
+    )
 }
 
 // Helper to create a config.toml pointing at the mock model server.
