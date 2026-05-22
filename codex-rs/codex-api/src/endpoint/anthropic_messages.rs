@@ -1,5 +1,6 @@
 mod request;
 
+use crate::anthropic_tool_names::AnthropicToolNameMap;
 use crate::auth::SharedAuthProvider;
 use crate::common::ResponseStream;
 use crate::common::ResponsesApiRequest;
@@ -67,10 +68,16 @@ impl<T: HttpTransport> AnthropicMessagesClient<T> {
             turn_state,
             ..
         } = options;
-        let body = anthropic_messages_request(request)?;
+        let encoded_request = anthropic_messages_request(request)?;
 
-        self.stream(body, extra_headers, compression, turn_state)
-            .await
+        self.stream_with_tool_name_map(
+            encoded_request.body,
+            extra_headers,
+            compression,
+            turn_state,
+            encoded_request.tool_name_map,
+        )
+        .await
     }
 
     fn path() -> &'static str {
@@ -94,6 +101,24 @@ impl<T: HttpTransport> AnthropicMessagesClient<T> {
         extra_headers: HeaderMap,
         compression: Compression,
         turn_state: Option<Arc<OnceLock<String>>>,
+    ) -> Result<ResponseStream, ApiError> {
+        self.stream_with_tool_name_map(
+            body,
+            extra_headers,
+            compression,
+            turn_state,
+            AnthropicToolNameMap::default(),
+        )
+        .await
+    }
+
+    async fn stream_with_tool_name_map(
+        &self,
+        body: Value,
+        extra_headers: HeaderMap,
+        compression: Compression,
+        turn_state: Option<Arc<OnceLock<String>>>,
+        tool_name_map: AnthropicToolNameMap,
     ) -> Result<ResponseStream, ApiError> {
         let request_compression = match compression {
             Compression::None => RequestCompression::None,
@@ -122,6 +147,7 @@ impl<T: HttpTransport> AnthropicMessagesClient<T> {
             self.session.provider().stream_idle_timeout,
             self.sse_telemetry.clone(),
             turn_state,
+            tool_name_map,
         ))
     }
 }

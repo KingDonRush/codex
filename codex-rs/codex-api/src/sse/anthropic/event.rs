@@ -1,4 +1,5 @@
 use serde::Deserialize;
+use serde_json::Value;
 
 #[derive(Debug, Deserialize)]
 pub(super) struct AnthropicStreamEvent {
@@ -49,6 +50,12 @@ pub(super) enum AnthropicContentBlock {
     Text {
         text: String,
     },
+    ToolUse {
+        id: String,
+        name: String,
+        #[serde(default = "empty_json_object")]
+        input: Value,
+    },
     #[serde(other)]
     Other,
 }
@@ -59,7 +66,16 @@ pub(super) enum AnthropicDelta {
     TextDelta {
         text: String,
     },
+    #[serde(rename = "input_json_delta")]
+    InputJsonDelta {
+        partial_json: String,
+    },
     ThinkingDelta {},
+    SignatureDelta {},
     #[serde(other)]
     Other,
+}
+
+fn empty_json_object() -> Value {
+    Value::Object(Default::default())
 }

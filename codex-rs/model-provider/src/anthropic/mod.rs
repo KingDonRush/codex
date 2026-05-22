@@ -44,7 +44,7 @@ impl ModelProvider for AnthropicModelProvider {
 
     fn capabilities(&self) -> ProviderCapabilities {
         ProviderCapabilities {
-            namespace_tools: false,
+            namespace_tools: true,
             image_generation: false,
             web_search: false,
         }
@@ -102,7 +102,7 @@ mod tests {
         assert_eq!(
             provider.capabilities(),
             ProviderCapabilities {
-                namespace_tools: false,
+                namespace_tools: true,
                 image_generation: false,
                 web_search: false,
             }
