@@ -229,6 +229,51 @@ Example with notification opt-out:
 - `config/batchWrite` — apply multiple config edits atomically to the user's config.toml on disk, with optional `reloadUserConfig: true` to hot-reload loaded threads, including multiple `desktop.*` edits.
 - `configRequirements/read` — fetch loaded requirements constraints from `requirements.toml` and/or MDM (or `null` if none are configured), including allow-lists (`allowedApprovalPolicies`, `allowedSandboxModes`, `allowedWebSearchModes`, `allowedPermissions`), lifecycle hook lockdown (`allowManagedHooksOnly`), computer use policy (`computerUse`), pinned feature values (`featureRequirements`), managed lifecycle hooks (`hooks`), `enforceResidency`, and `network` constraints such as canonical domain/socket permissions plus `managedAllowedDomainsOnly` and `dangerFullAccessDenylistOnly`.
 
+### Model Provider Picker Flow
+
+Clients that render a provider/model picker should treat app-server as the source of truth for both configured providers and provider-specific model catalogs. Do not read raw provider config through `config/read` for picker state, because `modelProvider/list` returns the sanitized metadata needed for UI rendering without exposing static header values or bearer tokens.
+
+To populate the picker:
+
+1. Call `modelProvider/list` and render each returned provider by `id`, `name`, `wireApi`, `isActive`, `requiresOpenaiAuth`, `envKey`, `envHttpHeaders`, `staticHttpHeaders`, and `capabilities`.
+2. Call `model/list` with `{ "modelProvider": "<provider-id>" }` for the selected provider. Repeat when the selected provider changes.
+3. Use `modelProvider/list.data[*].isActive` only as the current effective default. The client should still allow selecting any provider returned by the list unless local product policy hides it.
+4. Treat `staticHttpHeaders` as header names only. The response intentionally does not include header values, `experimental_bearer_token`, command auth arguments, or environment variable values.
+
+To apply a provider/model choice to a loaded thread without starting a turn, call experimental `thread/settings/update`:
+
+```json
+{
+  "method": "thread/settings/update",
+  "id": 40,
+  "params": {
+    "threadId": "thread_123",
+    "modelProvider": "anthropic",
+    "model": "claude-sonnet-4-6"
+  }
+}
+```
+
+This updates the loaded thread's next-turn settings and emits `thread/settings/updated` if the effective settings changed. For a new thread, pass the same `modelProvider` and `model` fields to `thread/start`; for a single turn override, pass them to `turn/start`.
+
+To persist the user's default provider/model in config, use `config/batchWrite` so the two fields update together:
+
+```json
+{
+  "method": "config/batchWrite",
+  "id": 41,
+  "params": {
+    "reloadUserConfig": true,
+    "edits": [
+      { "keyPath": "model_provider", "value": "anthropic", "mergeStrategy": "replace" },
+      { "keyPath": "model", "value": "claude-sonnet-4-6", "mergeStrategy": "replace" }
+    ]
+  }
+}
+```
+
+If a UI lets users create or edit third-party provider definitions, it should write provider config with the config APIs and then call `config/batchWrite` with `reloadUserConfig: true` or `config/mcpServer/reload` as appropriate for the edited area. Provider creation UIs must avoid persisting API keys as static config values when an environment-variable based setup is possible.
+
 ### Example: Start or resume a thread
 
 Start a fresh thread when you need a new Codex conversation.
