@@ -1,4 +1,5 @@
 // Aggregates all former standalone integration tests as modules.
+mod anthropic_smoke;
 mod resize_reflow;
 mod status_indicator;
 mod vt100_history;
