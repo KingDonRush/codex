@@ -336,6 +336,8 @@ pub enum ThreadItem {
         id: String,
         query: String,
         action: Option<WebSearchAction>,
+        #[serde(default)]
+        results: Option<JsonValue>,
     },
     #[serde(rename_all = "camelCase")]
     #[ts(rename_all = "camelCase")]
@@ -814,6 +816,7 @@ impl From<CoreTurnItem> for ThreadItem {
                 id: search.id,
                 query: search.query,
                 action: Some(WebSearchAction::from(search.action)),
+                results: search.results,
             },
             CoreTurnItem::ImageView(image) => ThreadItem::ImageView {
                 id: image.id,

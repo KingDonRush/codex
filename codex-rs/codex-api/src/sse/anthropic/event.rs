@@ -56,6 +56,17 @@ pub(super) enum AnthropicContentBlock {
         #[serde(default = "empty_json_object")]
         input: Value,
     },
+    ServerToolUse {
+        id: String,
+        name: String,
+        #[serde(default = "empty_json_object")]
+        input: Value,
+    },
+    WebSearchToolResult {
+        tool_use_id: String,
+        #[serde(default)]
+        content: Value,
+    },
     #[serde(other)]
     Other,
 }

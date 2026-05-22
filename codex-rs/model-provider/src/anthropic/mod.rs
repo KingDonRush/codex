@@ -46,7 +46,7 @@ impl ModelProvider for AnthropicModelProvider {
         ProviderCapabilities {
             namespace_tools: true,
             image_generation: false,
-            web_search: false,
+            web_search: true,
         }
     }
 
@@ -104,7 +104,7 @@ mod tests {
             ProviderCapabilities {
                 namespace_tools: true,
                 image_generation: false,
-                web_search: false,
+                web_search: true,
             }
         );
     }

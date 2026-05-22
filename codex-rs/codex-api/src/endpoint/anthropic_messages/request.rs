@@ -71,6 +71,7 @@ enum AnthropicContentBlock {
 #[serde(untagged)]
 enum AnthropicTool {
     Custom(AnthropicCustomTool),
+    WebSearch(AnthropicWebSearchTool),
 }
 
 #[derive(Debug, Serialize, PartialEq)]
@@ -78,6 +79,17 @@ struct AnthropicCustomTool {
     name: String,
     description: String,
     input_schema: Value,
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+struct AnthropicWebSearchTool {
+    #[serde(rename = "type")]
+    kind: String,
+    name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    allowed_domains: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    user_location: Option<Value>,
 }
 
 pub(super) fn anthropic_messages_request(
@@ -713,6 +725,57 @@ mod tests {
                 "input_schema": {"type": "object"}
             }])
         );
+    }
+
+    #[test]
+    fn converts_live_web_search_definition_to_anthropic_server_tool() {
+        let mut request = text_request();
+        request.tools = vec![serde_json::json!({
+            "type": "web_search",
+            "external_web_access": true,
+            "filters": {
+                "allowed_domains": ["example.com"]
+            },
+            "user_location": {
+                "type": "approximate",
+                "city": "New York",
+                "region": "New York",
+                "country": "US",
+                "timezone": "America/New_York"
+            }
+        })];
+
+        let body = anthropic_messages_body(request).expect("web_search should convert");
+
+        assert_eq!(
+            body["tools"],
+            serde_json::json!([{
+                "type": "web_search_20250305",
+                "name": "web_search",
+                "allowed_domains": ["example.com"],
+                "user_location": {
+                    "type": "approximate",
+                    "city": "New York",
+                    "region": "New York",
+                    "country": "US",
+                    "timezone": "America/New_York"
+                }
+            }])
+        );
+    }
+
+    #[test]
+    fn skips_cached_web_search_definition_for_anthropic() {
+        let mut request = text_request();
+        request.tools = vec![serde_json::json!({
+            "type": "web_search",
+            "external_web_access": false
+        })];
+
+        let body =
+            anthropic_messages_body(request).expect("cached web_search should be omitted safely");
+
+        assert!(body.get("tools").is_none());
     }
 
     #[test]

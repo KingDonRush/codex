@@ -297,6 +297,7 @@ impl EventProcessorWithJsonOutput {
                 id: raw_id,
                 query,
                 action,
+                results,
             } => Some(ExecThreadItem {
                 id: make_id(),
                 details: ThreadItemDetails::WebSearch(WebSearchItem {
@@ -309,6 +310,7 @@ impl EventProcessorWithJsonOutput {
                         .unwrap_or(WebSearchAction::Other),
                         None => WebSearchAction::Other,
                     },
+                    results,
                 }),
             }),
             _ => None,

@@ -180,7 +180,12 @@ pub fn parse_turn_item(item: &ResponseItem) -> Option<TurnItem> {
                 raw_content,
             }))
         }
-        ResponseItem::WebSearchCall { id, action, .. } => {
+        ResponseItem::WebSearchCall {
+            id,
+            action,
+            results,
+            ..
+        } => {
             let (action, query) = match action {
                 Some(action) => (action.clone(), web_search_action_detail(action)),
                 None => (WebSearchAction::Other, String::new()),
@@ -189,6 +194,7 @@ pub fn parse_turn_item(item: &ResponseItem) -> Option<TurnItem> {
                 id: id.clone().unwrap_or_default(),
                 query,
                 action,
+                results: results.clone(),
             }))
         }
         ResponseItem::ImageGenerationCall {

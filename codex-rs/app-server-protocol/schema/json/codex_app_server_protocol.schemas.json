@@ -14237,6 +14237,7 @@
                 ],
                 "writeOnly": true
               },
+              "results": true,
               "status": {
                 "type": [
                   "string",
@@ -16533,6 +16534,9 @@
               },
               "query": {
                 "type": "string"
+              },
+              "results": {
+                "default": null
               },
               "type": {
                 "enum": [

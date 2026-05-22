@@ -430,6 +430,13 @@ fn parses_web_search_call() {
             query: Some("weather".to_string()),
             queries: None,
         }),
+        results: Some(serde_json::json!([
+            {
+                "type": "web_search_result",
+                "title": "Weather",
+                "url": "https://example.com/weather"
+            }
+        ])),
     };
 
     let turn_item = parse_turn_item(&item).expect("expected web search turn item");
@@ -444,6 +451,13 @@ fn parses_web_search_call() {
                     query: Some("weather".to_string()),
                     queries: None,
                 },
+                results: Some(serde_json::json!([
+                    {
+                        "type": "web_search_result",
+                        "title": "Weather",
+                        "url": "https://example.com/weather"
+                    }
+                ])),
             }
         ),
         other => panic!("expected TurnItem::WebSearch, got {other:?}"),
@@ -458,6 +472,7 @@ fn parses_web_search_open_page_call() {
         action: Some(WebSearchAction::OpenPage {
             url: Some("https://example.com".to_string()),
         }),
+        results: None,
     };
 
     let turn_item = parse_turn_item(&item).expect("expected web search turn item");
@@ -471,6 +486,7 @@ fn parses_web_search_open_page_call() {
                 action: WebSearchAction::OpenPage {
                     url: Some("https://example.com".to_string()),
                 },
+                results: None,
             }
         ),
         other => panic!("expected TurnItem::WebSearch, got {other:?}"),
@@ -486,6 +502,7 @@ fn parses_web_search_find_in_page_call() {
             url: Some("https://example.com".to_string()),
             pattern: Some("needle".to_string()),
         }),
+        results: None,
     };
 
     let turn_item = parse_turn_item(&item).expect("expected web search turn item");
@@ -500,6 +517,7 @@ fn parses_web_search_find_in_page_call() {
                     url: Some("https://example.com".to_string()),
                     pattern: Some("needle".to_string()),
                 },
+                results: None,
             }
         ),
         other => panic!("expected TurnItem::WebSearch, got {other:?}"),
@@ -512,6 +530,7 @@ fn parses_partial_web_search_call_without_action_as_other() {
         id: Some("ws_partial".to_string()),
         status: Some("in_progress".to_string()),
         action: None,
+        results: None,
     };
 
     let turn_item = parse_turn_item(&item).expect("expected web search turn item");
@@ -522,6 +541,7 @@ fn parses_partial_web_search_call_without_action_as_other() {
                 id: "ws_partial".to_string(),
                 query: String::new(),
                 action: WebSearchAction::Other,
+                results: None,
             }
         ),
         other => panic!("expected TurnItem::WebSearch, got {other:?}"),

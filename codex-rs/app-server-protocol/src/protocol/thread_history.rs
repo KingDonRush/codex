@@ -394,6 +394,7 @@ impl ThreadHistoryBuilder {
             id: payload.call_id.clone(),
             query: String::new(),
             action: None,
+            results: None,
         };
         self.upsert_item_in_current_turn(item);
     }
@@ -403,6 +404,7 @@ impl ThreadHistoryBuilder {
             id: payload.call_id.clone(),
             query: payload.query.clone(),
             action: Some(WebSearchAction::from(payload.action.clone())),
+            results: payload.results.clone(),
         };
         self.upsert_item_in_current_turn(item);
     }
@@ -1884,6 +1886,13 @@ mod tests {
                     query: Some("codex".into()),
                     queries: None,
                 },
+                results: Some(serde_json::json!([
+                    {
+                        "type": "web_search_result",
+                        "title": "Codex",
+                        "url": "https://example.com/codex"
+                    }
+                ])),
             }),
             EventMsg::ExecCommandEnd(ExecCommandEndEvent {
                 call_id: "exec-1".into(),
@@ -1935,6 +1944,13 @@ mod tests {
                     query: Some("codex".into()),
                     queries: None,
                 }),
+                results: Some(serde_json::json!([
+                    {
+                        "type": "web_search_result",
+                        "title": "Codex",
+                        "url": "https://example.com/codex"
+                    }
+                ])),
             }
         );
         assert_eq!(

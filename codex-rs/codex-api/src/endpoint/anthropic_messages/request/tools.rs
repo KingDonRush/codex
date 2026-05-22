@@ -1,6 +1,7 @@
 use super::ANTHROPIC_TOOL_SEARCH_NAME;
 use super::AnthropicCustomTool;
 use super::AnthropicTool;
+use super::AnthropicWebSearchTool;
 use super::INTERNAL_TOOL_SEARCH_NAME;
 use crate::anthropic_tool_names::AnthropicToolNameMap;
 use crate::error::ApiError;
@@ -37,6 +38,22 @@ struct ResponsesToolSearchTool {
     #[serde(default)]
     description: String,
     parameters: Value,
+}
+
+#[derive(Debug, Deserialize)]
+struct ResponsesWebSearchTool {
+    #[serde(default)]
+    external_web_access: Option<bool>,
+    #[serde(default)]
+    filters: Option<ResponsesWebSearchFilters>,
+    #[serde(default)]
+    user_location: Option<Value>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ResponsesWebSearchFilters {
+    #[serde(default)]
+    allowed_domains: Option<Vec<String>>,
 }
 
 #[derive(Default)]
@@ -164,9 +181,31 @@ fn anthropic_tools_from_responses_api_tool(
                 }));
             Ok(())
         }
+        "web_search" => {
+            let web_search =
+                serde_json::from_value::<ResponsesWebSearchTool>(tool).map_err(|err| {
+                    ApiError::InvalidRequest {
+                        message: format!("invalid web_search tool for anthropic_messages: {err}"),
+                    }
+                })?;
+            if web_search.external_web_access == Some(false) {
+                return Ok(());
+            }
+            converted
+                .tools
+                .push(AnthropicTool::WebSearch(AnthropicWebSearchTool {
+                    kind: "web_search_20250305".to_string(),
+                    name: "web_search".to_string(),
+                    allowed_domains: web_search
+                        .filters
+                        .and_then(|filters| filters.allowed_domains),
+                    user_location: web_search.user_location,
+                }));
+            Ok(())
+        }
         _ => Err(ApiError::InvalidRequest {
             message: format!(
-                "anthropic_messages supports only function, namespace, and tool_search tools in this phase; got `{tool_type}`"
+                "anthropic_messages supports only function, namespace, tool_search, and web_search tools in this phase; got `{tool_type}`"
             ),
         }),
     }

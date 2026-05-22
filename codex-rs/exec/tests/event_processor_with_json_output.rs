@@ -368,6 +368,13 @@ fn web_search_completion_preserves_query_and_action() {
                     query: Some("rust async await".to_string()),
                     queries: None,
                 }),
+                results: Some(serde_json::json!([
+                    {
+                        "type": "web_search_result",
+                        "title": "Rust async",
+                        "url": "https://example.com/rust-async"
+                    }
+                ])),
             },
             thread_id: "thread-1".to_string(),
             turn_id: "turn-1".to_string(),
@@ -388,6 +395,13 @@ fn web_search_completion_preserves_query_and_action() {
                             query: Some("rust async await".to_string()),
                             queries: None,
                         },
+                        results: Some(serde_json::json!([
+                            {
+                                "type": "web_search_result",
+                                "title": "Rust async",
+                                "url": "https://example.com/rust-async"
+                            }
+                        ])),
                     }),
                 },
             })],
@@ -406,6 +420,7 @@ fn web_search_start_and_completion_reuse_item_id() {
                 id: "search-1".to_string(),
                 query: String::new(),
                 action: None,
+                results: None,
             },
             thread_id: "thread-1".to_string(),
             turn_id: "turn-1".to_string(),
@@ -421,6 +436,7 @@ fn web_search_start_and_completion_reuse_item_id() {
                     query: Some("rust async await".to_string()),
                     queries: None,
                 }),
+                results: None,
             },
             thread_id: "thread-1".to_string(),
             turn_id: "turn-1".to_string(),
@@ -438,6 +454,7 @@ fn web_search_start_and_completion_reuse_item_id() {
                         id: "search-1".to_string(),
                         query: String::new(),
                         action: WebSearchAction::Other,
+                        results: None,
                     }),
                 },
             })],
@@ -457,6 +474,7 @@ fn web_search_start_and_completion_reuse_item_id() {
                             query: Some("rust async await".to_string()),
                             queries: None,
                         },
+                        results: None,
                     }),
                 },
             })],

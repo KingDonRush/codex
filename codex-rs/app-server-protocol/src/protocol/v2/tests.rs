@@ -2430,6 +2430,13 @@ fn core_turn_item_into_thread_item_converts_supported_variants() {
             query: Some("docs".to_string()),
             queries: None,
         },
+        results: Some(serde_json::json!([
+            {
+                "type": "web_search_result",
+                "title": "Docs",
+                "url": "https://example.com/docs"
+            }
+        ])),
     });
 
     assert_eq!(
@@ -2441,6 +2448,13 @@ fn core_turn_item_into_thread_item_converts_supported_variants() {
                 query: Some("docs".to_string()),
                 queries: None,
             }),
+            results: Some(serde_json::json!([
+                {
+                    "type": "web_search_result",
+                    "title": "Docs",
+                    "url": "https://example.com/docs"
+                }
+            ])),
         }
     );
 
