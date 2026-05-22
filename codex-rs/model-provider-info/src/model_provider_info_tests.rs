@@ -299,6 +299,26 @@ fn test_built_in_model_providers_include_amazon_bedrock() {
 }
 
 #[test]
+fn test_built_in_model_providers_include_anthropic() {
+    let providers = built_in_model_providers(/*openai_base_url*/ None);
+    let provider = providers
+        .get(ANTHROPIC_PROVIDER_ID)
+        .expect("Anthropic provider should be built in");
+
+    assert!(provider.is_anthropic());
+    assert_eq!(provider.wire_api, WireApi::AnthropicMessages);
+    assert_eq!(provider.env_key.as_deref(), Some("ANTHROPIC_API_KEY"));
+    assert_eq!(
+        provider
+            .http_headers
+            .as_ref()
+            .and_then(|headers| headers.get("anthropic-version"))
+            .map(String::as_str),
+        Some("2023-06-01")
+    );
+}
+
+#[test]
 fn test_merge_configured_model_providers_adds_custom_provider() {
     let custom_provider = ModelProviderInfo {
         name: "Custom".to_string(),

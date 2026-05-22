@@ -5,6 +5,7 @@ use std::time::Duration;
 use anyhow::Result;
 use async_trait::async_trait;
 use bytes::Bytes;
+use codex_api::AnthropicMessagesClient;
 use codex_api::ApiError;
 use codex_api::AuthError;
 use codex_api::AuthProvider;
@@ -273,6 +274,72 @@ async fn responses_client_uses_responses_path() -> Result<()> {
 }
 
 #[tokio::test]
+async fn anthropic_messages_client_uses_messages_path_and_native_body() -> Result<()> {
+    let state = RecordingState::default();
+    let transport = RecordingTransport::new(state.clone());
+    let client = AnthropicMessagesClient::new(transport, provider("anthropic"), Arc::new(NoAuth));
+    let request = ResponsesApiRequest {
+        model: "claude-sonnet-4-6".to_string(),
+        instructions: "system instructions".to_string(),
+        input: vec![ResponseItem::Message {
+            id: None,
+            role: "user".to_string(),
+            content: vec![ContentItem::InputText {
+                text: "hello".to_string(),
+            }],
+            phase: None,
+        }],
+        tools: Vec::new(),
+        tool_choice: "auto".to_string(),
+        parallel_tool_calls: false,
+        max_output_tokens: Some(4096),
+        reasoning: None,
+        store: false,
+        stream: true,
+        include: Vec::new(),
+        service_tier: None,
+        prompt_cache_key: None,
+        text: None,
+        client_metadata: None,
+    };
+
+    let _stream = client
+        .stream_request(request, ResponsesOptions::default())
+        .await?;
+
+    let requests = state.take_stream_requests();
+    assert_path_ends_with(&requests, "/v1/messages");
+    assert_eq!(requests[0].method, http::Method::POST);
+    assert_eq!(
+        requests[0]
+            .headers
+            .get(http::header::ACCEPT)
+            .and_then(|value| value.to_str().ok()),
+        Some("text/event-stream")
+    );
+    let body = requests[0]
+        .body
+        .as_ref()
+        .and_then(RequestBody::json)
+        .expect("request should have json body");
+    assert_eq!(
+        body,
+        &serde_json::json!({
+            "model": "claude-sonnet-4-6",
+            "max_tokens": 4096,
+            "messages": [{
+                "role": "user",
+                "content": [{"type": "text", "text": "hello"}]
+            }],
+            "stream": true,
+            "system": "system instructions"
+        })
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn streaming_client_adds_auth_headers() -> Result<()> {
     let state = RecordingState::default();
     let transport = RecordingTransport::new(state.clone());
@@ -327,6 +394,7 @@ async fn streaming_client_retries_on_transport_error() -> Result<()> {
         tools: Vec::new(),
         tool_choice: "auto".into(),
         parallel_tool_calls: false,
+        max_output_tokens: None,
         reasoning: None,
         store: false,
         stream: true,
@@ -428,6 +496,7 @@ async fn azure_default_store_attaches_ids_and_headers() -> Result<()> {
         tools: Vec::new(),
         tool_choice: "auto".into(),
         parallel_tool_calls: false,
+        max_output_tokens: None,
         reasoning: None,
         store: true,
         stream: true,

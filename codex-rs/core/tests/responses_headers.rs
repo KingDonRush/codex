@@ -32,6 +32,152 @@ fn normalize_git_remote_url(url: &str) -> String {
 }
 
 const TEST_INSTALLATION_ID: &str = "11111111-1111-4111-8111-111111111111";
+const TEST_ANTHROPIC_MAX_OUTPUT_TOKENS: i64 = 4096;
+
+#[tokio::test]
+async fn anthropic_messages_provider_routes_to_messages_endpoint() {
+    core_test_support::skip_if_no_network!();
+
+    let server = wiremock::MockServer::start().await;
+    wiremock::Mock::given(wiremock::matchers::method("POST"))
+        .and(wiremock::matchers::path("/v1/messages"))
+        .respond_with(
+            wiremock::ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(anthropic_text_sse("msg-1", "ok")),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let provider = ModelProviderInfo {
+        name: "anthropic".into(),
+        base_url: Some(format!("{}/v1", server.uri())),
+        env_key: None,
+        env_key_instructions: None,
+        experimental_bearer_token: None,
+        auth: None,
+        aws: None,
+        wire_api: WireApi::AnthropicMessages,
+        query_params: None,
+        http_headers: Some(std::collections::HashMap::from([(
+            "anthropic-version".to_string(),
+            "2023-06-01".to_string(),
+        )])),
+        env_http_headers: None,
+        request_max_retries: Some(0),
+        stream_max_retries: Some(0),
+        stream_idle_timeout_ms: Some(5_000),
+        websocket_connect_timeout_ms: None,
+        requires_openai_auth: false,
+        supports_websockets: false,
+    };
+
+    let codex_home = TempDir::new().expect("failed to create TempDir");
+    let mut config = load_default_config_for_test(&codex_home).await;
+    config.model = Some("claude-sonnet-4-6".to_string());
+    config.model_provider_id = provider.name.clone();
+    config.model_provider = provider.clone();
+    let effort = config.model_reasoning_effort;
+    let summary = config.model_reasoning_summary;
+    let mut model_info =
+        codex_core::test_support::construct_model_info_offline("claude-sonnet-4-6", &config);
+    model_info.max_output_tokens = Some(TEST_ANTHROPIC_MAX_OUTPUT_TOKENS);
+    let model = model_info.slug.clone();
+    let config = Arc::new(config);
+
+    let thread_id = ThreadId::new();
+    let session_telemetry = SessionTelemetry::new(
+        thread_id,
+        model.as_str(),
+        model_info.slug.as_str(),
+        /*account_id*/ None,
+        Some("test@test.com".to_string()),
+        Some(TelemetryAuthMode::ApiKey),
+        "test_originator".to_string(),
+        /*log_user_prompts*/ false,
+        "test".to_string(),
+        SessionSource::Cli,
+    );
+
+    let client = ModelClient::new(
+        /*auth_manager*/ None,
+        thread_id.into(),
+        thread_id,
+        /*installation_id*/ TEST_INSTALLATION_ID.to_string(),
+        provider.clone(),
+        SessionSource::Cli,
+        config.model_verbosity,
+        /*enable_request_compression*/ false,
+        /*include_timing_metrics*/ false,
+        /*beta_features_header*/ None,
+        /*attestation_provider*/ None,
+    );
+    let mut client_session = client.new_session();
+
+    let mut prompt = Prompt::default();
+    prompt.input = vec![ResponseItem::Message {
+        id: None,
+        role: "user".into(),
+        content: vec![ContentItem::InputText {
+            text: "hello".into(),
+        }],
+        phase: None,
+    }];
+
+    let mut stream = client_session
+        .stream(
+            &prompt,
+            &model_info,
+            &session_telemetry,
+            effort,
+            summary.unwrap_or(model_info.default_reasoning_summary),
+            /*service_tier*/ None,
+            /*turn_metadata_header*/ None,
+            &codex_rollout_trace::InferenceTraceContext::disabled(),
+        )
+        .await
+        .expect("stream failed");
+    while let Some(event) = stream.next().await {
+        if matches!(event, Ok(ResponseEvent::Completed { .. })) {
+            break;
+        }
+    }
+
+    let requests = server
+        .received_requests()
+        .await
+        .expect("failed to fetch received requests");
+    let messages_requests = requests
+        .iter()
+        .filter(|request| request.url.path() == "/v1/messages")
+        .collect::<Vec<_>>();
+    assert_eq!(messages_requests.len(), 1);
+    let request = messages_requests[0];
+    assert_eq!(request.headers.get("authorization"), None);
+    assert_eq!(
+        request
+            .headers
+            .get("anthropic-version")
+            .and_then(|value| value.to_str().ok()),
+        Some("2023-06-01")
+    );
+    let body: serde_json::Value =
+        serde_json::from_slice(&request.body).expect("body should be json");
+    assert_eq!(body["model"].as_str(), Some("claude-sonnet-4-6"));
+    assert_eq!(
+        body["max_tokens"].as_i64(),
+        Some(TEST_ANTHROPIC_MAX_OUTPUT_TOKENS)
+    );
+    assert_eq!(body["stream"].as_bool(), Some(true));
+    assert!(body.get("input").is_none());
+    assert!(
+        body["messages"]
+            .as_array()
+            .is_some_and(|messages| !messages.is_empty()),
+        "Anthropic request should send Messages API history: {body:?}"
+    );
+}
 
 #[tokio::test]
 async fn responses_stream_includes_subagent_header_on_review() {
@@ -158,6 +304,27 @@ async fn responses_stream_includes_subagent_header_on_review() {
         Some(TEST_INSTALLATION_ID)
     );
     assert_eq!(request.header("x-codex-sandbox"), None);
+}
+
+fn anthropic_text_sse(message_id: &str, text: &str) -> String {
+    format!(
+        concat!(
+            "event: message_start\n",
+            "data: {{\"type\":\"message_start\",\"message\":{{\"id\":\"{message_id}\",\"usage\":{{\"input_tokens\":1,\"output_tokens\":0}}}}}}\n\n",
+            "event: content_block_start\n",
+            "data: {{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{{\"type\":\"text\",\"text\":\"\"}}}}\n\n",
+            "event: content_block_delta\n",
+            "data: {{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{{\"type\":\"text_delta\",\"text\":{text_json}}}}}\n\n",
+            "event: content_block_stop\n",
+            "data: {{\"type\":\"content_block_stop\",\"index\":0}}\n\n",
+            "event: message_delta\n",
+            "data: {{\"type\":\"message_delta\",\"usage\":{{\"output_tokens\":1}}}}\n\n",
+            "event: message_stop\n",
+            "data: {{\"type\":\"message_stop\"}}\n\n",
+        ),
+        message_id = message_id,
+        text_json = serde_json::json!(text),
+    )
 }
 
 #[tokio::test]

@@ -62,6 +62,29 @@ pub fn unauthenticated_auth_provider() -> SharedAuthProvider {
     Arc::new(UnauthenticatedAuthProvider)
 }
 
+#[derive(Clone, Debug)]
+struct ApiKeyHeaderAuthProvider {
+    header_name: http::HeaderName,
+    api_key: String,
+}
+
+impl ApiKeyHeaderAuthProvider {
+    fn new(header_name: http::HeaderName, api_key: String) -> Self {
+        Self {
+            header_name,
+            api_key,
+        }
+    }
+}
+
+impl AuthProvider for ApiKeyHeaderAuthProvider {
+    fn add_auth_headers(&self, headers: &mut HeaderMap) {
+        if let Ok(header) = HeaderValue::from_str(&self.api_key) {
+            let _ = headers.insert(self.header_name.clone(), header);
+        }
+    }
+}
+
 /// Returns the provider-scoped auth manager when this provider uses command-backed auth.
 ///
 /// Providers without custom auth continue using the caller-supplied base manager, when present.
@@ -79,6 +102,15 @@ pub(crate) fn resolve_provider_auth(
     auth: Option<&CodexAuth>,
     provider: &ModelProviderInfo,
 ) -> codex_protocol::error::Result<SharedAuthProvider> {
+    if provider.wire_api == codex_model_provider_info::WireApi::AnthropicMessages
+        && let Some(api_key) = provider.api_key()?
+    {
+        return Ok(Arc::new(ApiKeyHeaderAuthProvider::new(
+            http::HeaderName::from_static("x-api-key"),
+            api_key,
+        )));
+    }
+
     if let Some(auth) = bearer_auth_for_provider(provider)? {
         return Ok(Arc::new(auth));
     }
@@ -123,8 +155,11 @@ pub fn auth_provider_from_auth(auth: &CodexAuth) -> SharedAuthProvider {
 mod tests {
     use codex_model_provider_info::WireApi;
     use codex_model_provider_info::create_oss_provider_with_base_url;
+    use codex_protocol::error::CodexErr;
 
     use super::*;
+
+    const EXISTING_ENV_VAR_WITH_NON_EMPTY_VALUE: &str = "PATH";
 
     #[test]
     fn unauthenticated_auth_provider_adds_no_headers() {
@@ -133,5 +168,67 @@ mod tests {
         let auth = resolve_provider_auth(/*auth*/ None, &provider).expect("auth should resolve");
 
         assert!(auth.to_auth_headers().is_empty());
+    }
+
+    #[test]
+    fn api_key_header_auth_provider_adds_x_api_key_header() {
+        let auth = ApiKeyHeaderAuthProvider::new(
+            http::HeaderName::from_static("x-api-key"),
+            "anthropic-key".to_string(),
+        );
+        let headers = auth.to_auth_headers();
+
+        assert_eq!(
+            headers
+                .get("x-api-key")
+                .and_then(|value| value.to_str().ok()),
+            Some("anthropic-key")
+        );
+        assert!(!headers.contains_key(http::header::AUTHORIZATION));
+    }
+
+    #[test]
+    fn anthropic_auth_requires_configured_env_key() {
+        let mut provider = ModelProviderInfo::create_anthropic_provider();
+        let env_key = format!(
+            "CODEX_TEST_MISSING_ANTHROPIC_API_KEY_{}",
+            std::process::id()
+        );
+        provider.env_key = Some(env_key.clone());
+
+        let err = match resolve_provider_auth(/*auth*/ None, &provider) {
+            Ok(_) => panic!("missing Anthropic env key should fail auth resolution"),
+            Err(err) => err,
+        };
+
+        match err {
+            CodexErr::EnvVar(error) => {
+                assert_eq!(error.var, env_key);
+                assert_eq!(
+                    error.instructions.as_deref(),
+                    Some("Set ANTHROPIC_API_KEY to an Anthropic Console API key.")
+                );
+            }
+            other => panic!("expected env var error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn anthropic_auth_uses_x_api_key_from_env_key() {
+        let mut provider = ModelProviderInfo::create_anthropic_provider();
+        provider.env_key = Some(EXISTING_ENV_VAR_WITH_NON_EMPTY_VALUE.to_string());
+        let expected = std::env::var(EXISTING_ENV_VAR_WITH_NON_EMPTY_VALUE)
+            .expect("test env var should be present");
+
+        let auth = resolve_provider_auth(/*auth*/ None, &provider).expect("auth should resolve");
+        let headers = auth.to_auth_headers();
+
+        assert_eq!(
+            headers
+                .get("x-api-key")
+                .and_then(|value| value.to_str().ok()),
+            Some(expected.as_str())
+        );
+        assert!(!headers.contains_key(http::header::AUTHORIZATION));
     }
 }
