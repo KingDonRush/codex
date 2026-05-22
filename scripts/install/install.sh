@@ -868,6 +868,7 @@ if [ "$os" = "darwin" ] && [ "$arch" = "x86_64" ]; then
 fi
 
 if [ "$os" = "darwin" ]; then
+  fallback_vendor_target=""
   if [ "$arch" = "aarch64" ]; then
     npm_tag="darwin-arm64"
     vendor_target="aarch64-apple-darwin"
@@ -881,10 +882,12 @@ else
   if [ "$arch" = "aarch64" ]; then
     npm_tag="linux-arm64"
     vendor_target="aarch64-unknown-linux-musl"
+    fallback_vendor_target="aarch64-unknown-linux-gnu"
     platform_label="Linux (ARM64)"
   else
     npm_tag="linux-x64"
     vendor_target="x86_64-unknown-linux-musl"
+    fallback_vendor_target="x86_64-unknown-linux-gnu"
     platform_label="Linux (x64)"
   fi
 fi
@@ -894,6 +897,13 @@ package_asset="$package_asset_prefix-package-$vendor_target.tar.gz"
 checksum_asset="codex-package_SHA256SUMS"
 if release_asset_exists "$package_asset" "$resolved_version" &&
   release_asset_exists "$checksum_asset" "$resolved_version"; then
+  install_layout="package"
+  asset="$package_asset"
+elif [ -n "$fallback_vendor_target" ] &&
+  package_asset="$package_asset_prefix-package-$fallback_vendor_target.tar.gz" &&
+  release_asset_exists "$package_asset" "$resolved_version" &&
+  release_asset_exists "$checksum_asset" "$resolved_version"; then
+  vendor_target="$fallback_vendor_target"
   install_layout="package"
   asset="$package_asset"
 elif [ -n "$legacy_platform_npm_prefix" ] &&
