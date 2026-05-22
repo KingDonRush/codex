@@ -25,7 +25,12 @@ v2_enum_from_core!(
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
-pub struct ModelProviderCapabilitiesReadParams {}
+pub struct ModelProviderCapabilitiesReadParams {
+    /// Optional provider id from the configured `model_providers` map. Omitted reads the active
+    /// provider selected by config resolution.
+    #[ts(optional = nullable)]
+    pub model_provider: Option<String>,
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
@@ -40,6 +45,10 @@ pub struct ModelProviderCapabilitiesReadResponse {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct ModelListParams {
+    /// Optional provider id from the configured `model_providers` map. Omitted uses the active
+    /// provider selected when the app-server was started.
+    #[ts(optional = nullable)]
+    pub model_provider: Option<String>,
     /// Opaque pagination cursor returned by a previous call.
     #[ts(optional = nullable)]
     pub cursor: Option<String>,

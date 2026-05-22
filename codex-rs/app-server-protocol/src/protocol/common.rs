@@ -2587,6 +2587,7 @@ mod tests {
                 "method": "model/list",
                 "id": 6,
                 "params": {
+                    "modelProvider": null,
                     "limit": null,
                     "cursor": null,
                     "includeHidden": null
@@ -2601,13 +2602,17 @@ mod tests {
     fn serialize_model_provider_capabilities_read() -> Result<()> {
         let request = ClientRequest::ModelProviderCapabilitiesRead {
             request_id: RequestId::Integer(7),
-            params: v2::ModelProviderCapabilitiesReadParams {},
+            params: v2::ModelProviderCapabilitiesReadParams {
+                model_provider: None,
+            },
         };
         assert_eq!(
             json!({
                 "method": "modelProvider/capabilities/read",
                 "id": 7,
-                "params": {}
+                "params": {
+                    "modelProvider": null
+                }
             }),
             serde_json::to_value(&request)?,
         );

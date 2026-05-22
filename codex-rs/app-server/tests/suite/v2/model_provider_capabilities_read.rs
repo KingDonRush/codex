@@ -14,12 +14,17 @@ use tokio::time::timeout;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
-async fn read_capabilities(codex_home: &Path) -> Result<ModelProviderCapabilitiesReadResponse> {
+async fn read_capabilities(
+    codex_home: &Path,
+    model_provider: Option<&str>,
+) -> Result<ModelProviderCapabilitiesReadResponse> {
     let mut mcp = McpProcess::new(codex_home).await?;
     timeout(DEFAULT_TIMEOUT, mcp.initialize()).await??;
 
     let request_id = mcp
-        .send_model_provider_capabilities_read_request(ModelProviderCapabilitiesReadParams {})
+        .send_model_provider_capabilities_read_request(ModelProviderCapabilitiesReadParams {
+            model_provider: model_provider.map(str::to_string),
+        })
         .await?;
     let response: JSONRPCResponse = timeout(
         DEFAULT_TIMEOUT,
@@ -33,7 +38,7 @@ async fn read_capabilities(codex_home: &Path) -> Result<ModelProviderCapabilitie
 #[tokio::test]
 async fn read_default_provider_capabilities() -> Result<()> {
     let codex_home = TempDir::new()?;
-    let received = read_capabilities(codex_home.path()).await?;
+    let received = read_capabilities(codex_home.path(), /*model_provider*/ None).await?;
 
     let expected = ModelProviderCapabilitiesReadResponse {
         namespace_tools: true,
@@ -52,7 +57,7 @@ async fn read_amazon_bedrock_provider_capabilities() -> Result<()> {
         r#"model_provider = "amazon-bedrock"
 "#,
     )?;
-    let received = read_capabilities(codex_home.path()).await?;
+    let received = read_capabilities(codex_home.path(), /*model_provider*/ None).await?;
 
     let expected = ModelProviderCapabilitiesReadResponse {
         namespace_tools: false,
@@ -71,7 +76,21 @@ async fn read_anthropic_provider_capabilities() -> Result<()> {
         r#"model_provider = "anthropic"
 "#,
     )?;
-    let received = read_capabilities(codex_home.path()).await?;
+    let received = read_capabilities(codex_home.path(), /*model_provider*/ None).await?;
+
+    let expected = ModelProviderCapabilitiesReadResponse {
+        namespace_tools: true,
+        image_generation: false,
+        web_search: true,
+    };
+    assert_eq!(received, expected);
+    Ok(())
+}
+
+#[tokio::test]
+async fn read_explicit_provider_capabilities() -> Result<()> {
+    let codex_home = TempDir::new()?;
+    let received = read_capabilities(codex_home.path(), Some("anthropic")).await?;
 
     let expected = ModelProviderCapabilitiesReadResponse {
         namespace_tools: true,

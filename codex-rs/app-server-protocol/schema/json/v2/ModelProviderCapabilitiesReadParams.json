@@ -1,5 +1,14 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "modelProvider": {
+      "description": "Optional provider id from the configured `model_providers` map. Omitted reads the active provider selected by config resolution.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
   "title": "ModelProviderCapabilitiesReadParams",
   "type": "object"
 }

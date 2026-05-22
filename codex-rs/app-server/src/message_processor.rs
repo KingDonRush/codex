@@ -963,9 +963,9 @@ impl MessageProcessor {
                 .unwatch(connection_id, params)
                 .await
                 .map(|response| Some(response.into())),
-            ClientRequest::ModelProviderCapabilitiesRead { params: _, .. } => self
+            ClientRequest::ModelProviderCapabilitiesRead { params, .. } => self
                 .config_processor
-                .model_provider_capabilities_read()
+                .model_provider_capabilities_read(params)
                 .await
                 .map(|response| Some(response.into())),
             ClientRequest::ThreadStart { params, .. } => {

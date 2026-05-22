@@ -4,6 +4,11 @@
 
 export type ModelListParams = {
 /**
+ * Optional provider id from the configured `model_providers` map. Omitted uses the active
+ * provider selected when the app-server was started.
+ */
+modelProvider?: string | null,
+/**
  * Opaque pagination cursor returned by a previous call.
  */
 cursor?: string | null,
