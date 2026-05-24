@@ -3,43 +3,55 @@ use std::path::Path;
 use std::path::PathBuf;
 use tokio::process::Command;
 
+use super::DesktopAppKind;
+
 const CODEX_WINDOWS_INSTALLER_URL: &str =
     "https://get.microsoft.com/installer/download/9PLM9XGG6VKS?cid=website_cta_psi";
 const CODEX_MICROSOFT_STORE_WEB_URL: &str = "https://apps.microsoft.com/detail/9plm9xgg6vks";
 
 pub async fn run_windows_app_open_or_install(
+    kind: DesktopAppKind,
     workspace: PathBuf,
     download_url_override: Option<String>,
 ) -> anyhow::Result<()> {
-    if let Some(app_id) = find_codex_app_id().await? {
-        eprintln!("Opening Codex Desktop...");
-        open_installed_codex_app(&app_id).await?;
+    let product_name = kind.product_name();
+    if let Some(app_id) = find_app_id(kind).await? {
+        eprintln!("Opening {product_name} Desktop...");
+        open_installed_app(&app_id).await?;
         eprintln!(
-            "In Codex Desktop, open workspace {workspace}.",
+            "In {product_name} Desktop, open workspace {workspace}.",
             workspace = display_workspace_path(&workspace)
         );
         return Ok(());
     }
 
-    eprintln!("Codex Desktop not found; opening Windows installer...");
-    let download_url = download_url_override
-        .as_deref()
-        .unwrap_or(CODEX_WINDOWS_INSTALLER_URL);
-    if open_url(download_url).await.is_err() && download_url_override.is_none() {
-        open_url(CODEX_MICROSOFT_STORE_WEB_URL).await?;
+    if let Some(download_url) = download_url_override.as_deref() {
+        eprintln!("{product_name} Desktop not found; opening Windows installer...");
+        open_url(download_url).await?;
+    } else if kind == DesktopAppKind::Codex {
+        eprintln!("{product_name} Desktop not found; opening Windows installer...");
+        if open_url(CODEX_WINDOWS_INSTALLER_URL).await.is_err() {
+            open_url(CODEX_MICROSOFT_STORE_WEB_URL).await?;
+        }
+    } else {
+        anyhow::bail!("{product_name} Desktop not found; install it or pass --download-url");
     }
+
     eprintln!(
-        "After installing Codex Desktop, open workspace {workspace}.",
+        "After installing {product_name} Desktop, open workspace {workspace}.",
         workspace = display_workspace_path(&workspace)
     );
     Ok(())
 }
 
-async fn find_codex_app_id() -> anyhow::Result<Option<String>> {
+async fn find_app_id(kind: DesktopAppKind) -> anyhow::Result<Option<String>> {
+    let product_name = kind.product_name();
     let output = Command::new("powershell.exe")
         .arg("-NoProfile")
         .arg("-Command")
-        .arg("Get-StartApps -Name 'Codex' | Select-Object -First 1 -ExpandProperty AppID")
+        .arg(format!(
+            "Get-StartApps -Name '{product_name}' | Select-Object -First 1 -ExpandProperty AppID"
+        ))
         .output()
         .await
         .context("failed to invoke `powershell.exe`")?;
@@ -56,7 +68,7 @@ async fn find_codex_app_id() -> anyhow::Result<Option<String>> {
     }
 }
 
-async fn open_installed_codex_app(app_id: &str) -> anyhow::Result<()> {
+async fn open_installed_app(app_id: &str) -> anyhow::Result<()> {
     let target = format!("shell:AppsFolder\\{app_id}");
     open_shell_target(&target).await
 }

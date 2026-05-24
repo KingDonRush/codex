@@ -16,6 +16,7 @@ CODEX_RS_ROOT = REPO_ROOT / "codex-rs"
 @dataclass(frozen=True)
 class SourceBuildOutputs:
     entrypoint_bin: Path
+    companion_bins: tuple[Path, ...]
     bwrap_bin: Path | None
     codex_command_runner_bin: Path | None
     codex_windows_sandbox_setup_bin: Path | None
@@ -69,6 +70,10 @@ def build_source_binaries(
             entrypoint_bin,
             output_dir / variant.entrypoint_name(spec),
         ),
+        companion_bins=tuple(
+            output_dir / companion_name
+            for companion_name in variant.companion_entrypoint_names(spec)
+        ),
         bwrap_bin=resolve_output_path(
             bwrap_bin,
             output_dir / "bwrap" if spec.is_linux else None,
@@ -98,6 +103,7 @@ def source_binaries_for_target(
     binaries = []
     if build_entrypoint:
         binaries.append(variant.cargo_bin)
+        binaries.extend(variant.companion_executable_stems)
     if build_bwrap:
         binaries.append("bwrap")
     if build_codex_command_runner:
@@ -161,6 +167,7 @@ def cargo_profile_dirname(profile: str) -> str:
 def validate_source_outputs(outputs: SourceBuildOutputs) -> None:
     for path in [
         outputs.entrypoint_bin,
+        *outputs.companion_bins,
         outputs.bwrap_bin,
         outputs.codex_command_runner_bin,
         outputs.codex_windows_sandbox_setup_bin,

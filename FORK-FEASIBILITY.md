@@ -1042,6 +1042,42 @@ Estado da Fase 1:
 - `apply_patch` direto continua desabilitado no
   catalogo/capabilities.
 
+## Claudex launcher isolado
+
+`claudex` e um software separado do ponto de vista de instalacao e identidade:
+tem entrypoint nativo, pacote npm meta proprio e home proprio. Ele resolve
+`CLAUDEX_HOME` e injeta esse valor como `CODEX_HOME` no processo filho; se
+`CLAUDEX_HOME` nao existir, usa `~/.claudex`.
+
+Uso esperado:
+
+```bash
+claudex --version
+claudex exec "Reply OK."
+CLAUDEX_HOME=/tmp/claudex-home claudex app-server --listen stdio://
+```
+
+Contratos:
+
+- nao le nem grava `~/.codex` por padrao;
+- cria o diretorio de home antes de iniciar o processo filho;
+- aceita `CLAUDEX_CODEX_BIN` apenas como escape hatch de teste/dev para apontar
+  para um binario Codex especifico;
+- o pacote npm `claudex` expoe somente o bin `claudex`;
+- o pacote `@openai/codex` nao expoe `claudex`;
+- o package builder tambem aceita `--variant claudex` para criar pacote nativo
+  com `bin/claudex` e o companion interno `bin/codex`, porque o entrypoint
+  Claudex usa o binario Codex como implementacao isolada;
+- `claudex app` nao delega para `codex app`: quando houver shell Desktop
+  Claudex, ele deve abrir/procurar `Claudex`/`Claudex.app`; em plataformas ou
+  builds sem esse artefato, falha explicitamente em vez de abrir Codex Desktop.
+- o pipeline de release gera `claudex-package-*`, inclui esses arquivos no
+  manifesto `codex-package_SHA256SUMS`, publica o pacote npm `claudex` e copia
+  aliases `install-claudex.sh`/`install-claudex.ps1`;
+- os instaladores standalone aceitam `--variant claudex` e, nessa variante,
+  usam `CLAUDEX_HOME`/`~/.claudex`, `CLAUDEX_INSTALL_DIR` quando definido e o
+  comando visivel `claudex`.
+
 ## Checks obrigatorios por tipo de mudanca
 
 Sempre:

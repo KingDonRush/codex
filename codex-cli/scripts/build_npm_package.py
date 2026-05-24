@@ -71,6 +71,7 @@ PACKAGE_EXPANSIONS: dict[str, list[str]] = {
 
 PACKAGE_NATIVE_COMPONENTS: dict[str, list[str]] = {
     "codex": [],
+    "claudex": [],
     "codex-linux-x64": [CODEX_PACKAGE_COMPONENT],
     "codex-linux-arm64": [CODEX_PACKAGE_COMPONENT],
     "codex-darwin-x64": [CODEX_PACKAGE_COMPONENT],
@@ -202,6 +203,13 @@ def main() -> int:
                     f"    node {staging_dir_str}/bin/codex.js --version\n"
                     f"    node {staging_dir_str}/bin/codex.js --help\n\n"
                 )
+            elif package == "claudex":
+                print(
+                    f"Staged version {version} for release in {staging_dir_str}\n\n"
+                    "Verify Claudex:\n"
+                    f"    node {staging_dir_str}/bin/claudex.js --version\n"
+                    f"    node {staging_dir_str}/bin/claudex.js --help\n\n"
+                )
             elif package == "codex-responses-api-proxy":
                 print(
                     f"Staged version {version} for release in {staging_dir_str}\n\n"
@@ -264,6 +272,17 @@ def stage_sources(staging_dir: Path, version: str, package: str) -> None:
             shutil.copy2(readme_src, staging_dir / "README.md")
 
         package_json_path = CODEX_CLI_ROOT / "package.json"
+    elif package == "claudex":
+        bin_dir = staging_dir / "bin"
+        bin_dir.mkdir(parents=True, exist_ok=True)
+        for launcher in ("codex.js", "claudex.js"):
+            shutil.copy2(CODEX_CLI_ROOT / "bin" / launcher, bin_dir / launcher)
+
+        readme_src = REPO_ROOT / "README.md"
+        if readme_src.exists():
+            shutil.copy2(readme_src, staging_dir / "README.md")
+
+        package_json_path = CODEX_CLI_ROOT / "claudex-package.json"
     elif package in CODEX_PLATFORM_PACKAGES:
         platform_package = CODEX_PLATFORM_PACKAGES[package]
         platform_npm_tag = platform_package["npm_tag"]
@@ -315,16 +334,9 @@ def stage_sources(staging_dir: Path, version: str, package: str) -> None:
             package_json = json.load(fh)
         package_json["version"] = version
 
-    if package == "codex":
+    if package in ("codex", "claudex"):
         package_json["files"] = ["bin"]
-        package_json["optionalDependencies"] = {
-            CODEX_PLATFORM_PACKAGES[platform_package]["npm_name"]: (
-                f"npm:{CODEX_NPM_NAME}@"
-                f"{compute_platform_package_version(version, CODEX_PLATFORM_PACKAGES[platform_package]['npm_tag'])}"
-            )
-            for platform_package in PACKAGE_EXPANSIONS["codex"]
-            if platform_package != "codex"
-        }
+        package_json["optionalDependencies"] = platform_optional_dependencies(version)
 
     elif package == "codex-sdk":
         scripts = package_json.get("scripts")
@@ -346,6 +358,16 @@ def compute_platform_package_version(version: str, platform_tag: str) -> str:
     # npm forbids republishing the same package name/version, so each
     # platform-specific tarball needs a unique version string.
     return f"{version}-{platform_tag}"
+
+
+def platform_optional_dependencies(version: str) -> dict[str, str]:
+    return {
+        platform_package["npm_name"]: (
+            f"npm:{CODEX_NPM_NAME}@"
+            f"{compute_platform_package_version(version, platform_package['npm_tag'])}"
+        )
+        for platform_package in CODEX_PLATFORM_PACKAGES.values()
+    }
 
 
 def run_command(cmd: list[str], cwd: Path | None = None) -> None:

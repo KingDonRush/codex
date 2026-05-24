@@ -5,39 +5,51 @@ use std::path::PathBuf;
 use tempfile::Builder;
 use tokio::process::Command;
 
+use super::DesktopAppKind;
+
 const CODEX_DMG_URL_ARM64: &str = "https://persistent.oaistatic.com/codex-app-prod/Codex.dmg";
 const CODEX_DMG_URL_X64: &str =
     "https://persistent.oaistatic.com/codex-app-prod/Codex-latest-x64.dmg";
 
 pub async fn run_mac_app_open_or_install(
+    kind: DesktopAppKind,
     workspace: PathBuf,
     download_url_override: Option<String>,
 ) -> anyhow::Result<()> {
-    if let Some(app_path) = find_existing_codex_app_path() {
+    let product_name = kind.product_name();
+    if let Some(app_path) = find_existing_app_path(kind) {
         eprintln!(
-            "Opening Codex Desktop at {app_path}...",
+            "Opening {product_name} Desktop at {app_path}...",
             app_path = app_path.display()
         );
-        open_codex_app(&app_path, &workspace).await?;
+        open_app(&app_path, &workspace).await?;
         return Ok(());
     }
-    eprintln!("Codex Desktop not found; downloading installer...");
-    let download_url = download_url_override.unwrap_or_else(|| {
-        let default_url = if is_apple_silicon_mac() {
-            CODEX_DMG_URL_ARM64
+
+    let download_url = if let Some(download_url) = download_url_override {
+        download_url
+    } else if kind == DesktopAppKind::Codex {
+        if is_apple_silicon_mac() {
+            CODEX_DMG_URL_ARM64.to_string()
         } else {
-            CODEX_DMG_URL_X64
-        };
-        default_url.to_string()
-    });
-    let installed_app = download_and_install_codex_to_user_applications(&download_url)
+            CODEX_DMG_URL_X64.to_string()
+        }
+    } else {
+        anyhow::bail!(
+            "{product_name} Desktop not found; install {bundle_name} or pass --download-url",
+            bundle_name = kind.app_bundle_name()
+        );
+    };
+
+    eprintln!("{product_name} Desktop not found; downloading installer...");
+    let installed_app = download_and_install_app_to_user_applications(kind, &download_url)
         .await
-        .context("failed to download/install Codex Desktop")?;
+        .with_context(|| format!("failed to download/install {product_name} Desktop"))?;
     eprintln!(
-        "Launching Codex Desktop from {installed_app}...",
+        "Launching {product_name} Desktop from {installed_app}...",
         installed_app = installed_app.display()
     );
-    open_codex_app(&installed_app, &workspace).await?;
+    open_app(&installed_app, &workspace).await?;
     Ok(())
 }
 
@@ -63,21 +75,22 @@ fn is_apple_silicon_mac() -> bool {
         || macos_sysctl_flag("hw.optional.arm64").unwrap_or(false)
 }
 
-fn find_existing_codex_app_path() -> Option<PathBuf> {
-    candidate_codex_app_paths()
+fn find_existing_app_path(kind: DesktopAppKind) -> Option<PathBuf> {
+    candidate_app_paths(kind)
         .into_iter()
         .find(|candidate| candidate.is_dir())
 }
 
-fn candidate_codex_app_paths() -> Vec<PathBuf> {
-    let mut paths = vec![PathBuf::from("/Applications/Codex.app")];
+fn candidate_app_paths(kind: DesktopAppKind) -> Vec<PathBuf> {
+    let bundle_name = kind.app_bundle_name();
+    let mut paths = vec![PathBuf::from("/Applications").join(bundle_name)];
     if let Some(home) = std::env::var_os("HOME") {
-        paths.push(PathBuf::from(home).join("Applications").join("Codex.app"));
+        paths.push(PathBuf::from(home).join("Applications").join(bundle_name));
     }
     paths
 }
 
-async fn open_codex_app(app_path: &Path, workspace: &Path) -> anyhow::Result<()> {
+async fn open_app(app_path: &Path, workspace: &Path) -> anyhow::Result<()> {
     eprintln!(
         "Opening workspace {workspace}...",
         workspace = workspace.display()
@@ -101,7 +114,11 @@ async fn open_codex_app(app_path: &Path, workspace: &Path) -> anyhow::Result<()>
     );
 }
 
-async fn download_and_install_codex_to_user_applications(dmg_url: &str) -> anyhow::Result<PathBuf> {
+async fn download_and_install_app_to_user_applications(
+    kind: DesktopAppKind,
+    dmg_url: &str,
+) -> anyhow::Result<PathBuf> {
+    let product_name = kind.product_name();
     let temp_dir = Builder::new()
         .prefix("codex-app-installer-")
         .tempdir()
@@ -109,19 +126,20 @@ async fn download_and_install_codex_to_user_applications(dmg_url: &str) -> anyho
     let tmp_root = temp_dir.path().to_path_buf();
     let _temp_dir = temp_dir;
 
-    let dmg_path = tmp_root.join("Codex.dmg");
+    let dmg_path = tmp_root.join(format!("{product_name}.dmg"));
     download_dmg(dmg_url, &dmg_path).await?;
 
-    eprintln!("Mounting Codex Desktop installer...");
+    eprintln!("Mounting {product_name} Desktop installer...");
     let mount_point = mount_dmg(&dmg_path).await?;
     eprintln!(
         "Installer mounted at {mount_point}.",
         mount_point = mount_point.display()
     );
     let result = async {
-        let app_in_volume = find_codex_app_in_mount(&mount_point)
-            .context("failed to locate Codex.app in mounted dmg")?;
-        install_codex_app_bundle(&app_in_volume).await
+        let app_in_volume = find_app_in_mount(kind, &mount_point).with_context(|| {
+            format!("failed to locate {} in mounted dmg", kind.app_bundle_name())
+        })?;
+        install_app_bundle(kind, &app_in_volume).await
     }
     .await;
 
@@ -136,10 +154,12 @@ async fn download_and_install_codex_to_user_applications(dmg_url: &str) -> anyho
     result
 }
 
-async fn install_codex_app_bundle(app_in_volume: &Path) -> anyhow::Result<PathBuf> {
+async fn install_app_bundle(kind: DesktopAppKind, app_in_volume: &Path) -> anyhow::Result<PathBuf> {
+    let product_name = kind.product_name();
+    let bundle_name = kind.app_bundle_name();
     for applications_dir in candidate_applications_dirs()? {
         eprintln!(
-            "Installing Codex Desktop into {applications_dir}...",
+            "Installing {product_name} Desktop into {applications_dir}...",
             applications_dir = applications_dir.display()
         );
         std::fs::create_dir_all(&applications_dir).with_context(|| {
@@ -149,7 +169,7 @@ async fn install_codex_app_bundle(app_in_volume: &Path) -> anyhow::Result<PathBu
             )
         })?;
 
-        let dest_app = applications_dir.join("Codex.app");
+        let dest_app = applications_dir.join(bundle_name);
         if dest_app.is_dir() {
             return Ok(dest_app);
         }
@@ -158,14 +178,14 @@ async fn install_codex_app_bundle(app_in_volume: &Path) -> anyhow::Result<PathBu
             Ok(()) => return Ok(dest_app),
             Err(err) => {
                 eprintln!(
-                    "warning: failed to install Codex.app to {applications_dir}: {err}",
+                    "warning: failed to install {bundle_name} to {applications_dir}: {err}",
                     applications_dir = applications_dir.display()
                 );
             }
         }
     }
 
-    anyhow::bail!("failed to install Codex.app to any applications directory");
+    anyhow::bail!("failed to install {bundle_name} to any applications directory");
 }
 
 fn candidate_applications_dirs() -> anyhow::Result<Vec<PathBuf>> {
@@ -233,10 +253,18 @@ async fn detach_dmg(mount_point: &Path) -> anyhow::Result<()> {
     anyhow::bail!("hdiutil detach failed with {status}");
 }
 
-fn find_codex_app_in_mount(mount_point: &Path) -> anyhow::Result<PathBuf> {
-    let direct = mount_point.join("Codex.app");
+fn find_app_in_mount(kind: DesktopAppKind, mount_point: &Path) -> anyhow::Result<PathBuf> {
+    let direct = mount_point.join(kind.app_bundle_name());
     if direct.is_dir() {
         return Ok(direct);
+    }
+
+    if kind != DesktopAppKind::Codex {
+        anyhow::bail!(
+            "no {} bundle found at {mount_point}",
+            kind.app_bundle_name(),
+            mount_point = mount_point.display()
+        );
     }
 
     for entry in std::fs::read_dir(mount_point).with_context(|| {
